@@ -61,13 +61,13 @@ class PacketOutTest(P4RuntimeTest):
     def testPacket(self, pkt):
         for outport in [self.port1, self.port2]:
             # Build PacketOut message.
-            # TODO EXERCISE 4
+            # DONE EXERCISE 4
             # Modify metadata names to match the content of your P4Info file
             # ---- START SOLUTION ----
             packet_out_msg = self.helper.build_packet_out(
                 payload=str(pkt),
                 metadata={
-                    "MODIFY ME": outport,
+                    "egress_port": outport,
                     "_pad": 0
                 })
             # ---- END SOLUTION ----
@@ -104,31 +104,31 @@ class PacketInTest(P4RuntimeTest):
 
         # Insert ACL entry to match on the given eth_type and clone to CPU.
         eth_type = pkt[Ether].type
-        # TODO EXERCISE 4
+        # DONE EXERCISE 4
         # Modify names to match content of P4Info file (look for the fully
         # qualified name of the ACL table, EtherType match field, and
         # clone_to_cpu action.
         # ---- START SOLUTION ----
         self.insert(self.helper.build_table_entry(
-            table_name="MODIFY ME",
+            table_name="IngressPipeImpl.acl_table",
             match_fields={
                 # Ternary match.
-                "MODIFY ME": (eth_type, 0xffff)
+                "hdr.ethernet.ether_type": (eth_type, 0xffff)
             },
-            action_name="MODIFY ME",
+            action_name="IngressPipeImpl.clone_to_cpu",
             priority=DEFAULT_PRIORITY
         ))
         # ---- END SOLUTION ----
 
         for inport in [self.port1, self.port2, self.port3]:
-            # TODO EXERCISE 4
+            # DONE EXERCISE 4
             # Modify metadata names to match the content of your P4Info file
             # ---- START SOLUTION ----
             # Expected P4Runtime PacketIn message.
             exp_packet_in_msg = self.helper.build_packet_in(
                 payload=str(pkt),
                 metadata={
-                    "MODIFY ME": inport,
+                    "ingress_port": inport,
                     "_pad": 0
                 })
             # ---- END SOLUTION ----

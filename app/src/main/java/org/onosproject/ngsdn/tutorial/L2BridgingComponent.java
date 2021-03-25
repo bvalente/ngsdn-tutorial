@@ -62,9 +62,9 @@ import static org.onosproject.ngsdn.tutorial.AppConstants.INITIAL_SETUP_DELAY;
  */
 @Component(
         immediate = true,
-        // *** TODO EXERCISE 4
+        // *** DONE EXERCISE 4
         // Enable component (enabled = true)
-        enabled = false
+        enabled = true
 )
 public class L2BridgingComponent {
 

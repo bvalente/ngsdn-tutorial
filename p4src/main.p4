@@ -424,7 +424,7 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
     }
 
 
-    // *** TODO EXERCISE 5 (IPV6 ROUTING)
+    // *** DONE EXERCISE 5 (IPV6 ROUTING)
     //
     // 1. Create a table to to handle NDP messages to resolve the MAC address of
     //    switch. This table should:
@@ -445,6 +445,73 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
     //
     // You can name your tables whatever you like. You will need to fill
     // the name in elsewhere in this exercise.
+
+    //snippets
+    action ndp_ns_to_na(mac_addr_t target_mac) {
+        hdr.ethernet.src_addr = target_mac;
+        hdr.ethernet.dst_addr = IPV6_MCAST_01;
+        ipv6_addr_t host_ipv6_tmp = hdr.ipv6.src_addr;
+        hdr.ipv6.src_addr = hdr.ndp.target_ipv6_addr;
+        hdr.ipv6.dst_addr = host_ipv6_tmp;
+        hdr.ipv6.next_hdr = IP_PROTO_ICMPV6;
+        hdr.icmpv6.type = ICMP6_TYPE_NA;
+        hdr.ndp.flags = NDP_FLAG_ROUTER | NDP_FLAG_OVERRIDE;
+        hdr.ndp.type = NDP_OPT_TARGET_LL_ADDR;
+        hdr.ndp.length = 1;
+        hdr.ndp.target_mac_addr = target_mac;
+        standard_metadata.egress_spec = standard_metadata.ingress_port;
+    }
+
+    action_selector(HashAlgorithm.crc16, 32w1024, 32w16) ecmp_selector;
+
+    // ndp_reply_table
+    table ndp_reply_table {
+        key = {
+            hdr.ndp.target_ipv6_addr: exact;
+        }
+        actions = {
+            ndp_ns_to_na;
+        }
+        @name("ndp_reply_table_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
+    // my_station_table
+    table my_station_table {
+        key = {
+            hdr.ethernet.dst_addr: exact;
+        }
+        actions = {
+            NoAction;
+        }
+        @name("my_station_table_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
+    // routing_v6_table
+    action set_next_hop(mac_addr_t dmac) {
+        hdr.ethernet.src_addr = hdr.ethernet.dst_addr;
+        hdr.ethernet.dst_addr = dmac;
+        hdr.ipv6.hop_limit = hdr.ipv6.hop_limit - 1;
+    }
+    table routing_v6_table {
+        key = {
+            hdr.ipv6.dst_addr: lpm;
+            hdr.ipv6.dst_addr: selector;
+            hdr.ipv6.src_addr: selector;
+            hdr.ipv6.flow_label: selector;
+            hdr.ipv6.next_hdr: selector;
+            local_metadata.l4_src_port: selector;
+            local_metadata.l4_dst_port: selector;
+        }
+        actions = {
+            set_next_hop;
+        }
+        implementation = ecmp_selector;
+        @name("routing_v6_table_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
 
 
     // *** TODO EXERCISE 6 (SRV6)
@@ -497,28 +564,36 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
     apply {
 
         if (hdr.cpu_out.isValid()) {
-            // *** TODO EXERCISE 4
+            // *** DONE EXERCISE 4
             // Implement logic such that if this is a packet-out from the
             // controller:
             // 1. Set the packet egress port to that found in the cpu_out header
             // 2. Remove (set invalid) the cpu_out header
             // 3. Exit the pipeline here (no need to go through other tables
+            standard_metadata.egress_spec = hdr.cpu_out.egress_port;
+            hdr.cpu_out.setInvalid();
+            exit;
+
         }
 
         bool do_l3_l2 = true;
 
         if (hdr.icmpv6.isValid() && hdr.icmpv6.type == ICMP6_TYPE_NS) {
-            // *** TODO EXERCISE 5
+            // *** DONE EXERCISE 5
             // Insert logic to handle NDP messages to resolve the MAC address of the
             // switch. You should apply the NDP reply table created before.
             // If this is an NDP NS packet, i.e., if a matching entry is found,
             // unset the "do_l3_l2" flag to skip the L3 and L2 tables, as the
             // "ndp_ns_to_na" action already set an egress port.
+
+            if(ndp_reply_table.apply().hit) {
+                do_l3_l2 = false;
+            }
         }
 
         if (do_l3_l2) {
 
-            // *** TODO EXERCISE 5
+            // *** DONE EXERCISE 5
             // Insert logic to match the My Station table and upon hit, the
             // routing table. You should also add a conditional to drop the
             // packet if the hop_limit reaches 0.
@@ -528,6 +603,14 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
             // as logic to perform PSP behavior. HINT: This logic belongs
             // somewhere between checking the switch's my station table and
             // applying the routing table.
+
+            if(hdr.ipv6.isValid() && my_station_table.apply().hit) {
+
+                
+                routing_v6_table.apply();
+                //TTL
+                if(hdr.ipv6.hop_limit == 0) { drop(); }
+            }
 
             // L2 bridging logic. Apply the exact table first...
             if (!l2_exact_table.apply().hit) {
@@ -549,13 +632,16 @@ control EgressPipeImpl (inout parsed_headers_t hdr,
     apply {
 
         if (standard_metadata.egress_port == CPU_PORT) {
-            // *** TODO EXERCISE 4
+            // *** DONE EXERCISE 4
             // Implement logic such that if the packet is to be forwarded to the
             // CPU port, e.g., if in ingress we matched on the ACL table with
             // action send/clone_to_cpu...
             // 1. Set cpu_in header as valid
             // 2. Set the cpu_in.ingress_port field to the original packet's
             //    ingress port (standard_metadata.ingress_port).
+            hdr.cpu_in.setValid();
+            hdr.cpu_in.ingress_port = standard_metadata.ingress_port;
+            exit;
         }
 
         // If this is a multicast packet (flag set by l2_ternary_table), make

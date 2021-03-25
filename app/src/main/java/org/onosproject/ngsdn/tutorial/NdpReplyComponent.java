@@ -60,9 +60,9 @@ import static org.onosproject.ngsdn.tutorial.AppConstants.INITIAL_SETUP_DELAY;
  */
 @Component(
         immediate = true,
-        // *** TODO EXERCISE 5
+        // *** DONE EXERCISE 5
         // Enable component (enabled = true)
-        enabled = false
+        enabled = true
 )
 public class NdpReplyComponent {
 
@@ -194,7 +194,7 @@ public class NdpReplyComponent {
                                            Ip6Address targetIpv6Address,
                                            MacAddress targetMac) {
 
-        // *** TODO EXERCISE 5
+        // *** DONE EXERCISE 5
         // Modify P4Runtime entity names to match content of P4Info file (look
         // for the fully qualified name of tables, match fields, and actions.
         // ---- START SOLUTION ----
@@ -206,11 +206,11 @@ public class NdpReplyComponent {
         final PiActionParam targetMacParam = new PiActionParam(
                 PiActionParamId.of("target_mac"), targetMac.toBytes());
         final PiAction action = PiAction.builder()
-                .withId(PiActionId.of("MODIFY ME"))
+                .withId(PiActionId.of("IngressPipeImpl.ndp_ns_to_na"))
                 .withParameter(targetMacParam)
                 .build();
         // Table ID.
-        final String tableId = "MODIFY ME";
+        final String tableId = "IngressPipeImpl.ndp_reply_table";
         // ---- END SOLUTION ----
 
         // Build flow rule.
