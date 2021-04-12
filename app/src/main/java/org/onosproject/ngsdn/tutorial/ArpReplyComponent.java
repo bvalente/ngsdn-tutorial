@@ -16,6 +16,7 @@
 
 package org.onosproject.ngsdn.tutorial;
 
+import org.onlab.packet.Ip4Address;
 import org.onlab.packet.Ip6Address;
 import org.onlab.packet.IpAddress;
 import org.onlab.packet.MacAddress;
@@ -62,12 +63,12 @@ import static org.onosproject.ngsdn.tutorial.AppConstants.INITIAL_SETUP_DELAY;
         immediate = true,
         // *** DONE EXERCISE 5
         // Enable component (enabled = true)
-        enabled = false
+        enabled = true
 )
-public class NdpReplyComponent {
+public class ArpReplyComponent {
 
     private static final Logger log =
-            LoggerFactory.getLogger(NdpReplyComponent.class.getName());
+            LoggerFactory.getLogger(ArpReplyComponent.class.getName());
 
     //--------------------------------------------------------------------------
     // ONOS CORE SERVICE BINDING
@@ -132,7 +133,7 @@ public class NdpReplyComponent {
     private void setUpAllDevices() {
         deviceService.getAvailableDevices().forEach(device -> {
             if (mastershipService.isLocalMaster(device.id())) {
-                log.info("*** NDP REPLY - Starting Initial set up for {}...", device.id());
+                log.info("*** ARP REPLY - Starting Initial set up for {}...", device.id());
                 setUpDevice(device.id());
             }
         });
@@ -164,18 +165,18 @@ public class NdpReplyComponent {
                 .collect(Collectors.toSet());
 
         if (interfaces.isEmpty()) {
-            log.info("{} does not have any IPv6 interface configured",
+            log.info("{} does not have any IPv4 interface configured",
                      deviceId);
             return;
         }
 
         // Generate and install flow rules.
-        log.info("Adding rules to {} to generate NDP NA for {} IPv6 interfaces...",
+        log.info("Adding rules to {} to generate ARP REPLY for {} IPv4 interfaces...",
                  deviceId, interfaces.size());
         final Collection<FlowRule> flowRules = interfaces.stream()
-                .map(this::getIp6Addresses)
+                .map(this::getIp4Addresses)
                 .flatMap(Collection::stream)
-                .map(ipv6addr -> buildNdpReplyFlowRule(deviceId, ipv6addr, deviceMac))
+                .map(ipv4addr -> buildArpReplyFlowRule(deviceId, ipv4addr, deviceMac))
                 .collect(Collectors.toSet());
 
         installRules(flowRules);
@@ -190,8 +191,8 @@ public class NdpReplyComponent {
      * @param targetMac         target MAC address
      * @return flow rule object
      */
-    private FlowRule buildNdpReplyFlowRule(DeviceId deviceId,
-                                           Ip6Address targetIpv6Address,
+    private FlowRule buildArpReplyFlowRule(DeviceId deviceId,
+                                           Ip4Address targetIpv4Address,
                                            MacAddress targetMac) {
 
         // *** DONE EXERCISE 5
@@ -200,17 +201,17 @@ public class NdpReplyComponent {
         // ---- START SOLUTION ----
         // Build match.
         final PiCriterion match = PiCriterion.builder()
-                .matchExact(PiMatchFieldId.of("hdr.ndp.target_ipv6_addr"), targetIpv6Address.toOctets())
+                .matchExact(PiMatchFieldId.of("hdr.arp.protoDstAddr"), targetIpv4Address.toOctets())
                 .build();
         // Build action.
         final PiActionParam targetMacParam = new PiActionParam(
                 PiActionParamId.of("target_mac"), targetMac.toBytes());
         final PiAction action = PiAction.builder()
-                .withId(PiActionId.of("IngressPipeImpl.ndp_ns_to_na"))
+                .withId(PiActionId.of("IngressPipeImpl.arp_request_to_reply"))
                 .withParameter(targetMacParam)
                 .build();
         // Table ID.
-        final String tableId = "IngressPipeImpl.ndp_reply_table";
+        final String tableId = "IngressPipeImpl.arp_reply_table";
         // ---- END SOLUTION ----
 
         // Build flow rule.
@@ -274,12 +275,12 @@ public class NdpReplyComponent {
      * @param iface interface instance
      * @return collection of IPv6 addresses
      */
-    private Collection<Ip6Address> getIp6Addresses(Interface iface) {
+    private Collection<Ip4Address> getIp4Addresses(Interface iface) {
         return iface.ipAddressesList()
                 .stream()
                 .map(InterfaceIpAddress::ipAddress)
-                .filter(IpAddress::isIp6)
-                .map(IpAddress::getIp6Address)
+                .filter(IpAddress::isIp4)
+                .map(IpAddress::getIp4Address)
                 .collect(Collectors.toSet());
     }
 

@@ -16,6 +16,7 @@
 
 package org.onosproject.ngsdn.tutorial.common;
 
+import org.onlab.packet.Ip4Address;
 import org.onlab.packet.Ip6Address;
 import org.onlab.packet.MacAddress;
 import org.onosproject.net.DeviceId;
@@ -35,7 +36,7 @@ public class FabricDeviceConfig extends Config<DeviceId> {
     public boolean isValid() {
         return hasOnlyFields(MY_STATION_MAC, MY_SID, IS_SPINE) &&
                 myStationMac() != null &&
-                mySid() != null;
+                get(MY_SID, null) != null; //avoid Invalid IPv4/IPv6 exception
     }
 
     /**
@@ -56,6 +57,16 @@ public class FabricDeviceConfig extends Config<DeviceId> {
     public Ip6Address mySid() {
         String ip = get(MY_SID, null);
         return ip != null ? Ip6Address.valueOf(ip) : null;
+    }
+
+    /**
+     * Gets the IPv4 of the switch
+     * 
+     * @return IP address of the router. Or null if not configured
+     */
+    public Ip4Address mySidv4() {
+        String ip = get(MY_SID, null);
+        return ip != null ? Ip4Address.valueOf(ip) : null;
     }
 
     /**

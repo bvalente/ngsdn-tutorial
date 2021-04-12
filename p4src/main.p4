@@ -44,6 +44,7 @@ typedef bit<128> ipv6_addr_t;
 typedef bit<16>  l4_port_t;
 
 const bit<16> ETHERTYPE_IPV4 = 0x0800;
+const bit<16> ETHERTYPE_ARP  = 0x0806;
 const bit<16> ETHERTYPE_IPV6 = 0x86dd;
 
 const bit<8> IP_PROTO_ICMP   = 1;
@@ -51,6 +52,9 @@ const bit<8> IP_PROTO_TCP    = 6;
 const bit<8> IP_PROTO_UDP    = 17;
 const bit<8> IP_PROTO_SRV6   = 43;
 const bit<8> IP_PROTO_ICMPV6 = 58;
+
+const bit<16> ARP_REQUEST     = 1;
+const bit<16> ARP_REPLY       = 2;
 
 const mac_addr_t IPV6_MCAST_01 = 0x33_33_00_00_00_01;
 
@@ -160,6 +164,18 @@ header ndp_t {
     bit<48>      target_mac_addr;
 }
 
+header arp_t {
+    bit<16>   hwType16;
+    bit<16>   protoType;
+    bit<8>    hwAddrLen;
+    bit<8>    protoAddrLen;
+    bit<16>   opcode;
+    bit<48>   hwSrcAddr;
+    bit<32>   protoSrcAddr;
+    bit<48>   hwDstAddr;
+    bit<32>   protoDstAddr;
+}
+
 // Packet-in header. Prepended to packets sent to the CPU_PORT and used by the
 // P4Runtime server (Stratum) to populate the PacketIn message metadata fields.
 // Here we use it to carry the original ingress port where the packet was
@@ -193,6 +209,7 @@ struct parsed_headers_t {
     icmp_t icmp;
     icmpv6_t icmpv6;
     ndp_t ndp;
+    arp_t arp;
 }
 
 struct local_metadata_t {
@@ -202,6 +219,7 @@ struct local_metadata_t {
     ipv6_addr_t next_srv6_sid;
     bit<8>      ip_proto;
     bit<8>      icmp_type;
+    bit<16>      arp_op;
 }
 
 
@@ -230,6 +248,7 @@ parser ParserImpl (packet_in packet,
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.ether_type){
             ETHERTYPE_IPV4: parse_ipv4;
+            ETHERTYPE_ARP : parse_arp;
             ETHERTYPE_IPV6: parse_ipv6;
             default: accept;
         }
@@ -244,6 +263,12 @@ parser ParserImpl (packet_in packet,
             IP_PROTO_ICMP: parse_icmp;
             default: accept;
         }
+    }
+
+    state parse_arp {
+        packet.extract(hdr.arp);
+        local_metadata.arp_op = hdr.arp.opcode;
+        transition accept;
     }
 
     state parse_ipv6 {
@@ -423,6 +448,58 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         counters = direct_counter(CounterType.packets_and_bytes);
     }
 
+    // MY EXERCISE
+
+    action arp_request_to_reply(mac_addr_t target_mac) {
+        hdr.ethernet.dst_addr = hdr.ethernet.src_addr;
+        hdr.ethernet.src_addr = target_mac;
+        hdr.arp.opcode = ARP_REPLY;
+        hdr.arp.hwDstAddr = hdr.arp.hwSrcAddr;
+        hdr.arp.hwSrcAddr = target_mac;
+        bit<32> protoDstAddr = hdr.arp.protoDstAddr;
+        hdr.arp.protoDstAddr = hdr.arp.protoSrcAddr;
+        hdr.arp.protoSrcAddr = protoDstAddr;
+        standard_metadata.egress_spec = standard_metadata.ingress_port;
+    }
+
+    table arp_reply_table {
+        key = {
+            hdr.arp.protoDstAddr: exact;
+        }
+        actions = {
+            arp_request_to_reply;
+        }
+        @name("arp_reply_table_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
+    action_selector(HashAlgorithm.crc16, 32w1024, 32w16) ecmp_selector_v4;
+
+    // routing_v4_table
+    action set_next_hop_v4(mac_addr_t dmac) {
+        hdr.ethernet.src_addr = hdr.ethernet.dst_addr;
+        hdr.ethernet.dst_addr = dmac;
+        hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
+    }
+
+    table routing_v4_table {
+        key = {
+            hdr.ipv4.dst_addr: lpm;
+            hdr.ipv4.dst_addr: selector;
+            hdr.ipv4.src_addr: selector;
+            //hdr.ipv4.flow_label: selector;
+            //hdr.ipv4.next_hdr: selector;
+            local_metadata.l4_src_port: selector;
+            local_metadata.l4_dst_port: selector;
+        }
+        actions = {
+            set_next_hop_v4;
+        }
+        implementation = ecmp_selector_v4;
+        @name("routing_v4_table_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
 
     // *** DONE EXERCISE 5 (IPV6 ROUTING)
     //
@@ -591,6 +668,14 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
             }
         }
 
+        if (hdr.arp.isValid() && hdr.arp.opcode == ARP_REQUEST) {
+            
+            if(arp_reply_table.apply().hit) {
+                do_l3_l2 = false;
+            }
+
+        }
+
         if (do_l3_l2) {
 
             // *** DONE EXERCISE 5
@@ -604,13 +689,21 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
             // somewhere between checking the switch's my station table and
             // applying the routing table.
 
-            if(hdr.ipv6.isValid() && my_station_table.apply().hit) {
+            if(my_station_table.apply().hit) {
 
+                if(hdr.ipv6.isValid()) {
+                    
+                    routing_v6_table.apply();
+                    if(hdr.ipv6.hop_limit == 0) { drop(); }
+
+                } else if(hdr.ipv4.isValid()) {
+
+                    routing_v4_table.apply();
+                    if(hdr.ipv4.ttl == 0) { drop(); }
+                }
                 
-                routing_v6_table.apply();
-                //TTL
-                if(hdr.ipv6.hop_limit == 0) { drop(); }
             }
+
 
             // L2 bridging logic. Apply the exact table first...
             if (!l2_exact_table.apply().hit) {
@@ -698,6 +791,7 @@ control DeparserImpl(packet_out packet, in parsed_headers_t hdr) {
         packet.emit(hdr.icmp);
         packet.emit(hdr.icmpv6);
         packet.emit(hdr.ndp);
+        packet.emit(hdr.arp);
     }
 }
 
