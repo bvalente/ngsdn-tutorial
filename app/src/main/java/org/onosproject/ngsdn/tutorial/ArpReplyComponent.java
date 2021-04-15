@@ -17,12 +17,12 @@
 package org.onosproject.ngsdn.tutorial;
 
 import org.onlab.packet.Ip4Address;
-import org.onlab.packet.Ip6Address;
 import org.onlab.packet.IpAddress;
 import org.onlab.packet.MacAddress;
 import org.onlab.util.ItemNotFoundException;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.mastership.MastershipService;
+import org.onosproject.net.Device;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.config.NetworkConfigService;
 import org.onosproject.net.device.DeviceEvent;
@@ -32,6 +32,10 @@ import org.onosproject.net.flow.FlowRule;
 import org.onosproject.net.flow.FlowRuleOperations;
 import org.onosproject.net.flow.FlowRuleService;
 import org.onosproject.net.flow.criteria.PiCriterion;
+import org.onosproject.net.Host;
+import org.onosproject.net.host.HostEvent;
+import org.onosproject.net.host.HostListener;
+import org.onosproject.net.host.HostService;
 import org.onosproject.net.host.InterfaceIpAddress;
 import org.onosproject.net.intf.Interface;
 import org.onosproject.net.intf.InterfaceService;
@@ -52,6 +56,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import static org.onosproject.ngsdn.tutorial.AppConstants.INITIAL_SETUP_DELAY;
 
@@ -93,9 +98,13 @@ public class ArpReplyComponent {
     protected DeviceService deviceService;
 
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
+    protected HostService hostService;
+
+    @Reference(cardinality = ReferenceCardinality.MANDATORY)
     private MainComponent mainComponent;
 
     private DeviceListener deviceListener = new InternalDeviceListener();
+    private HostListener hostListener = new InternatlHostListener();
     private ApplicationId appId;
 
     //--------------------------------------------------------------------------
@@ -110,6 +119,7 @@ public class ArpReplyComponent {
         appId = mainComponent.getAppId();
         // Register listeners to be informed about device events.
         deviceService.addListener(deviceListener);
+        hostService.addListener(hostListener);
         // Schedule set up of existing devices. Needed when reloading the app.
         mainComponent.scheduleTask(this::setUpAllDevices, INITIAL_SETUP_DELAY);
         log.info("Started");
@@ -118,6 +128,7 @@ public class ArpReplyComponent {
     @Deactivate
     public void deactivate() {
         deviceService.removeListener(deviceListener);
+        hostService.removeListener(hostListener);
         log.info("Stopped");
     }
 
@@ -179,6 +190,39 @@ public class ArpReplyComponent {
                 .map(ipv4addr -> buildArpReplyFlowRule(deviceId, ipv4addr, deviceMac))
                 .collect(Collectors.toSet());
 
+        installRules(flowRules);
+    }
+
+    private void setUpHost(Host host) {
+
+        // Get IPv4
+        final Collection<Ip4Address> hostIpv4Addrs = host.ipAddresses().stream()
+            .filter(IpAddress::isIp4)
+            .map(IpAddress::getIp4Address)
+            .collect(Collectors.toSet());
+        
+        if (hostIpv4Addrs.isEmpty()) {
+            // Ignore.
+            log.debug("No IPv4 addresses for host {}, ignore", host.id());
+            return;
+        } else {
+            log.info("Adding ARP routes on all devices for host {} [{}]",
+                    host.id(), hostIpv4Addrs);
+        }
+
+        // first IPv4
+        final Ip4Address hostIp = hostIpv4Addrs.iterator().next();
+
+        //get MAC
+        final MacAddress hostMac = host.mac();
+
+        //get all devices and create flow rules
+        final Collection<FlowRule> flowRules = StreamSupport
+            .stream(deviceService.getAvailableDevices().spliterator(), false)
+            .map(Device::id)
+            .map(id -> buildArpReplyFlowRule(id, hostIp, hostMac))
+            .collect(Collectors.toSet());
+        
         installRules(flowRules);
     }
 
@@ -263,6 +307,45 @@ public class ArpReplyComponent {
                 });
             }
         }
+    }
+
+    /**
+     * Listener of host events.
+     */
+    public class InternatlHostListener implements HostListener {
+
+        @Override
+        public boolean isRelevant(HostEvent event) {
+            switch (event.type()) {
+                case HOST_ADDED:
+                    break;
+                case HOST_REMOVED:
+                case HOST_UPDATED:
+                case HOST_MOVED:
+                default:
+                    // Ignore other events.
+                    // Food for thoughts:
+                    // how to support host moved/removed events?
+                    return false;
+            }
+            // Process host event only if this controller instance is the master
+            // for the device where this host is attached.
+            final Host host = event.subject();
+            final DeviceId deviceId = host.location().deviceId();
+            return mastershipService.isLocalMaster(deviceId);
+        }
+
+        @Override
+        public void event(HostEvent event) {
+            //load ARP to all devices
+            Host host = event.subject();
+            mainComponent.getExecutorService().execute(() -> {
+                log.info("{} event! host={}",
+                    event.type(), host.id());
+                setUpHost(host);
+            });
+        }
+
     }
 
     //--------------------------------------------------------------------------
