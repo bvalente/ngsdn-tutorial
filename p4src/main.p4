@@ -450,6 +450,27 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 
     // MY EXERCISE
 
+    action_selector(HashAlgorithm.crc16, 32w1024, 32w16) ecmp_selector_l2;
+
+    table l2_exact_table_ecmp {
+        key = {
+            hdr.ethernet.dst_addr: exact;
+            hdr.ipv4.dst_addr: selector;
+            hdr.ipv4.src_addr: selector;
+            local_metadata.l4_src_port: selector;
+            local_metadata.l4_dst_port: selector;
+            //hope this works
+            hdr.ipv4.identification: selector;
+            hdr.ipv4.total_len: selector;
+        }
+        actions = {
+            set_egress_port;
+        }
+        implementation = ecmp_selector_l2;
+        @name("l2_exact_table_ecmp_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
     action arp_request_to_reply(mac_addr_t target_mac) {
         hdr.ethernet.dst_addr = hdr.ethernet.src_addr;
         hdr.ethernet.src_addr = target_mac;
@@ -704,13 +725,20 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
                 
             }
 
+            //first hit ecmp, then normal table, then ternary
 
-            // L2 bridging logic. Apply the exact table first...
-            if (!l2_exact_table.apply().hit) {
-                // ...if an entry is NOT found, apply the ternary one in case
-                // this is a multicast/broadcast NDP NS packet.
-                l2_ternary_table.apply();
+            //1:20am, im tired
+            if (!l2_exact_table_ecmp.apply().hit) {
+
+                // L2 bridging logic. Apply the exact table first...
+                if (!l2_exact_table.apply().hit) {
+                    // ...if an entry is NOT found, apply the ternary one in case
+                    // this is a multicast/broadcast NDP NS packet.
+                    l2_ternary_table.apply();
+                }
+
             }
+
         }
 
         // Lastly, apply the ACL table.

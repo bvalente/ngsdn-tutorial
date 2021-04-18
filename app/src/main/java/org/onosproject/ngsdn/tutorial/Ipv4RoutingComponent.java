@@ -28,6 +28,7 @@ import org.onlab.packet.MacAddress;
 import org.onlab.util.ItemNotFoundException;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.mastership.MastershipService;
+import org.onosproject.net.ConnectPoint;
 import org.onosproject.net.Device;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.Host;
@@ -70,9 +71,11 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 import static com.google.common.collect.Streams.stream;
@@ -368,7 +371,11 @@ public class Ipv4RoutingComponent {
             mainComponent.getExecutorService().execute(() -> {
                 log.info("{} event! host={}, deviceId={}, port={}",
                         event.type(), host.id(), deviceId, host.location().port());
+                
                 setUpHostRules(deviceId, host);
+
+                //my code!
+                blackMagic(host);
             });
         }
     }
@@ -466,6 +473,116 @@ public class Ipv4RoutingComponent {
     // Called by event listeners, these methods implement the actual routing
     // policy, responsible of computing paths and creating ECMP groups.
     //--------------------------------------------------------------------------
+
+    private FlowRule createBlackMagicRule(DeviceId deviceId, MacAddress mac,
+                                       int groupId) {
+
+        // *** DONE EXERCISE 5
+        // Modify P4Runtime entity names to match content of P4Info file (look
+        // for the fully qualified name of tables, match fields, and actions.
+        // ---- START SOLUTION ----
+        final String tableId = "IngressPipeImpl.l2_exact_table_ecmp";
+        final PiCriterion match = PiCriterion.builder()
+                .matchExact(
+                        PiMatchFieldId.of("hdr.ethernet.dst_addr"),
+                        mac.toBytes())
+                .build();
+
+        final PiTableAction action = PiActionProfileGroupId.of(groupId);
+        // ---- END SOLUTION ----
+
+        return Utils.buildFlowRule(
+                deviceId, appId, tableId, match, action);
+    }
+
+    private GroupDescription createBlackMagicGroup(int groupId,
+                                                Collection<PortNumber> ports,
+                                                DeviceId deviceId) {
+
+        String actionProfileId = "IngressPipeImpl.ecmp_selector_l2";
+
+        final List<PiAction> actions = Lists.newArrayList();
+
+        // Build one "set next hop" action for each next hop
+        // *** DONE EXERCISE 5
+        // Modify P4Runtime entity names to match content of P4Info file (look
+        // for the fully qualified name of tables, match fields, and actions.
+        // ---- START SOLUTION ----
+        final String tableId = "IngressPipeImpl.l2_exact_table_ecmp";
+        for (PortNumber port : ports) {
+            final PiAction action = PiAction.builder()
+                    .withId(PiActionId.of("IngressPipeImpl.set_egress_port"))
+                    .withParameter(new PiActionParam(
+                            // Action param name.
+                            PiActionParamId.of("port_num"),
+                            // Action param value.
+                            port.toLong()))
+                    .build();
+
+            actions.add(action);
+        }
+        // ---- END SOLUTION ----
+
+        return Utils.buildSelectGroup(
+                deviceId, tableId, actionProfileId, groupId, actions, appId);
+    }
+
+    //setup rules for l2 routing
+    private void blackMagic(Host host){
+
+        //master device
+        DeviceId master = host.location().deviceId();
+
+        //get master's spines
+        Collection<ConnectPoint> spinesCP = linkService.getDeviceIngressLinks(master).stream()
+            .map(Link::src)
+            .filter(cp -> this.isSpine(cp.deviceId()))
+            .collect(Collectors.toSet());
+        
+        //install routes in all spines
+        Collection<FlowRule> lules = spinesCP.stream()
+            .map(cp -> createL2NextHopRule(cp.deviceId(), host.mac(), cp.port()) )
+            .collect(Collectors.toSet());
+        
+        lules.forEach(flowRuleService::applyFlowRules);
+
+
+        //get all devices except master and send to spines
+        Collection<DeviceId> links = stream(deviceService.getAvailableDevices())
+            .map(Device::id)
+            .filter(dv -> !dv.equals(master))
+            .filter(this::isLeaf)
+            .collect(Collectors.toSet());
+            // .map(linkService::getDeviceEgressLinks);
+        
+        
+
+        int groupId = macToGroupId(host.mac());
+        // int groupId = DEFAULT_ECMP_GROUP_ID;
+
+        for (DeviceId dv : links) {
+            
+            //for dv get all ports leading to spines
+            Collection<PortNumber> ports = linkService.getDeviceEgressLinks(dv).stream()
+                // .map(Link::src)
+                .filter(lk -> this.isSpine(lk.dst().deviceId()))
+                .map(Link::src)
+                .map(ConnectPoint::port)
+                .collect(Collectors.toSet());
+
+            GroupDescription ecmpGroup = createBlackMagicGroup(
+                groupId, ports, dv);
+            
+            List<FlowRule> flowRules = new LinkedList<FlowRule>();
+            FlowRule rule = createBlackMagicRule(dv, host.mac(), groupId);
+            flowRules.add(rule);
+            insertInOrder(ecmpGroup, flowRules);
+        }
+
+        //get direct device and add l2_exact_table entry
+        //done somewhere else
+    }
+
 
     /**
      * Set up L2 nexthop rules of a device to providing forwarding inside the
