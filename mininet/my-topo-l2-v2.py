@@ -39,6 +39,7 @@ class IPv4Host(Host):
         self.cmd('ip -4 addr add %s dev %s' % (ip, self.defaultIntf()))
         if gw:
             self.cmd('ip -4 route add default via %s' % gw)
+            self.cmd('arping -W 60 %s > /dev/null &' % gw) #periodic arp to gateway
         # Disable offload
         for attr in ["rx", "tx", "sg"]:
             cmd = "/sbin/ethtool --offload %s %s off" % (
@@ -88,26 +89,26 @@ class TutorialTopo(Topo):
 
         # IPv4 hosts attached to leaf 1
         h1 = self.addHost('h1', cls=IPv4Host, mac="00:00:00:00:00:10",
-                           ip='10.0.10.1/16', gw='10.0.255.254')
+                           ip='10.0.10.1/16', gw='10.0.100.1')
         h2 = self.addHost('h2', cls=IPv4Host, mac="00:00:00:00:00:20",
-                           ip='10.0.10.2/16', gw='10.0.255.254')
+                           ip='10.0.10.2/16', gw='10.0.100.1')
         self.addLink(h1, leaf1)  # port 3
         self.addLink(h2, leaf1)  # port 4
 
         # IPv4 hosts attached to leaf 2
         h3 = self.addHost('h3', cls=IPv4Host, mac="00:00:00:00:00:30",
-                          ip='10.0.20.3/16', gw='10.0.255.254')
+                          ip='10.0.20.3/16', gw='10.0.100.1')
         h4 = self.addHost('h4', cls=IPv4Host, mac="00:00:00:00:00:40",
-                          ip='10.0.20.4/16', gw='10.0.255.254')
+                          ip='10.0.20.4/16', gw='10.0.100.1')
         self.addLink(h3, leaf2)  # port 3
         self.addLink(h4, leaf2)  # port 4
 
         # extended
         # IPv4 hosts attached to leaf 3
         h5 = self.addHost('h5', cls=IPv4Host, mac="00:00:00:00:00:50",
-                          ip='10.0.30.5/16', gw='10.0.255.254')
+                          ip='10.0.30.5/16', gw='10.0.100.1')
         h6 = self.addHost('h6', cls=IPv4Host, mac="00:00:00:00:00:60",
-                          ip='10.0.30.6/16', gw='10.0.255.254')
+                          ip='10.0.30.6/16', gw='10.0.100.1')
         self.addLink(h5, leaf3)  # port 3
         self.addLink(h6, leaf3)  # port 4
 

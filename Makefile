@@ -37,7 +37,7 @@ _start:
 	@mkdir -p tmp/onos
 	@NGSDN_TOPO_PY=${NGSDN_TOPO_PY} docker-compose up -d
 
-start: NGSDN_TOPO_PY := topo-v6.py
+start: NGSDN_TOPO_PY := my-topo-l2-v2.py
 start: _start
 
 start-my-v4: NGSDN_TOPO_PY := my-topo-v4.py
@@ -48,6 +48,9 @@ start-my-l2: _start
 
 start-my-l2-v2: NGSDN_TOPO_PY := my-topo-l2-v2.py
 start-my-l2-v2: _start
+
+start-v6: NGSDN_TOPO_PY := topo-v6.py
+start-v6: _start
 
 start-v4: NGSDN_TOPO_PY := topo-v4.py
 start-v4: _start
@@ -86,7 +89,7 @@ _netcfg:
 		${onos_url}/v1/network/configuration -d@./mininet/${NGSDN_NETCFG_JSON}
 	@echo
 
-netcfg: NGSDN_NETCFG_JSON := netcfg.json
+netcfg: NGSDN_NETCFG_JSON := my-netcfg-l2-v2.json
 netcfg: _netcfg
 
 netcfg-my-v4: NGSDN_NETCFG_JSON := my-netcfg-v4.json
@@ -97,6 +100,9 @@ netcfg-my-l2: _netcfg
 
 netcfg-my-l2-v2: NGSDN_NETCFG_JSON := my-netcfg-l2-v2.json
 netcfg-my-l2-v2: _netcfg
+
+netcfg-v6: NGSDN_NETCFG_JSON := netcfg.json
+netcfg-v6: _netcfg
 
 netcfg-sr: NGSDN_NETCFG_JSON := netcfg-sr.json
 netcfg-sr: _netcfg
