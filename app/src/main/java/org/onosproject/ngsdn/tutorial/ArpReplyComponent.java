@@ -54,8 +54,11 @@ import org.osgi.service.component.annotations.ReferenceCardinality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.stream.Collector;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import static org.onosproject.ngsdn.tutorial.AppConstants.INITIAL_SETUP_DELAY;
@@ -122,6 +125,8 @@ public class ArpReplyComponent {
         hostService.addListener(hostListener);
         // Schedule set up of existing devices. Needed when reloading the app.
         mainComponent.scheduleTask(this::setUpAllDevices, INITIAL_SETUP_DELAY);
+        // Schedule set up of existing hosts. Needed when reloading the app.
+        mainComponent.scheduleTask(this::setUpAllHosts, INITIAL_SETUP_DELAY);
         log.info("Started");
     }
 
@@ -152,7 +157,7 @@ public class ArpReplyComponent {
 
     /**
      * Performs setup of the given device by creating a flow rule to generate
-     * NDP NA packets for IPv6 addresses associated to the device interfaces.
+     * ARP Reply packets for IPv4 addresses associated to the device interfaces.
      *
      * @param deviceId device ID
      */
@@ -184,15 +189,52 @@ public class ArpReplyComponent {
         // Generate and install flow rules.
         log.info("Adding rules to {} to generate ARP REPLY for {} IPv4 interfaces...",
                  deviceId, interfaces.size());
-        final Collection<FlowRule> flowRules = interfaces.stream()
+        
+        // TODO: replace interface approach
+        // Get list of IPs
+        final Collection<Ip4Address> ip4Addresses = interfaces.stream()
                 .map(this::getIp4Addresses)
                 .flatMap(Collection::stream)
-                .map(ipv4addr -> buildArpReplyFlowRule(deviceId, ipv4addr, deviceMac))
                 .collect(Collectors.toSet());
 
-        installRules(flowRules);
+        // Get list of switches
+        final Collection<DeviceId> devices = StreamSupport
+            .stream(deviceService.getAvailableDevices().spliterator(), false)
+            .map(Device::id)
+            .collect(Collectors.toSet());
+        
+        // Create flowRules for each switch
+        Collection<FlowRule> flowRules = new ArrayList<FlowRule>();
+        
+        for (DeviceId device : devices) {
+
+            flowRules.addAll( ip4Addresses.stream()
+                .map(ipv4addr -> buildArpReplyFlowRule(device, ipv4addr, deviceMac))
+                .collect(Collectors.toSet()) );
+            
+        }
+
+        installRules(flowRules);   
     }
 
+    /**
+     * Set up all hosts for which this ONOS instance is currently master.
+     */
+    private void setUpAllHosts() {
+        hostService.getHosts().forEach(host -> {
+            if (mastershipService.isLocalMaster(host.location().deviceId())) {
+                log.info("*** ARP REPLY - Starting Initial set up for {}...", host.id());
+                setUpHost(host);
+            }
+        });
+    }
+
+    /**
+     * Performs setup of the given device by creating a flow rule to generate
+     * ARP Reply packets for IPv4 addresses associated to the host interface.
+     * 
+     * @param host host
+     */
     private void setUpHost(Host host) {
 
         // Get IPv4
@@ -225,6 +267,39 @@ public class ArpReplyComponent {
         
         installRules(flowRules);
     }
+
+    private void removeHost(Host host){
+
+        // Get IPv4
+        final Collection<Ip4Address> hostIpv4Addrs = host.ipAddresses().stream()
+            .filter(IpAddress::isIp4)
+            .map(IpAddress::getIp4Address)
+            .collect(Collectors.toSet());
+        
+        if (hostIpv4Addrs.isEmpty()) {
+            // Ignore.
+            log.debug("No IPv4 addresses for host {}, ignore", host.id());
+            return;
+        } else {
+            log.info("Removing ARP routes on all devices for host {} [{}]",
+                    host.id(), hostIpv4Addrs);
+        }
+
+        // first IPv4
+        final Ip4Address hostIp = hostIpv4Addrs.iterator().next();
+
+        //get MAC
+        final MacAddress hostMac = host.mac();
+
+        //get all devices and create flow rules
+        final Collection<FlowRule> flowRules = StreamSupport
+            .stream(deviceService.getAvailableDevices().spliterator(), false)
+            .map(Device::id)
+            .map(id -> buildArpReplyFlowRule(id, hostIp, hostMac))
+            .collect(Collectors.toSet());
+        
+        removeRules(flowRules);
+}
 
     /**
      * Build a flow rule for the NDP reply table on the given device, for the
@@ -318,8 +393,8 @@ public class ArpReplyComponent {
         public boolean isRelevant(HostEvent event) {
             switch (event.type()) {
                 case HOST_ADDED:
-                    break;
                 case HOST_REMOVED:
+                    break;
                 case HOST_UPDATED:
                 case HOST_MOVED:
                 default:
@@ -335,6 +410,7 @@ public class ArpReplyComponent {
             return mastershipService.isLocalMaster(deviceId);
         }
 
+        //example https://github.com/opennetworkinglab/onos/blob/2b4de873e4033b7973b399d25cb8828a73bc2e24/web/gui/src/main/java/org/onosproject/ui/impl/topo/model/UiSharedTopologyModel.java#L491
         @Override
         public void event(HostEvent event) {
             //load ARP to all devices
@@ -342,7 +418,21 @@ public class ArpReplyComponent {
             mainComponent.getExecutorService().execute(() -> {
                 log.info("{} event! host={}",
                     event.type(), host.id());
-                setUpHost(host);
+                
+                switch(event.type()){
+
+                    case HOST_ADDED:
+                        setUpHost(host);
+                        break;
+
+                    case HOST_REMOVED:
+                        removeHost(host);
+                        break;
+
+                    // TODO: HOST_UPDATED, HOST_MOVED
+                    default:
+                        break;
+                }
             });
         }
 
@@ -376,5 +466,14 @@ public class ArpReplyComponent {
         FlowRuleOperations.Builder ops = FlowRuleOperations.builder();
         flowRules.forEach(ops::add);
         flowRuleService.apply(ops.build());
+    }
+
+    /**
+     * Removes the given flow rules in batch using the flow rule service.
+     *
+     * @param flowRules flow rules to remove
+     */
+    private void removeRules(Collection<FlowRule> flowRules) {
+        flowRuleService.removeFlowRules(flowRules.toArray(new FlowRule[flowRules.size()]));
     }
 }

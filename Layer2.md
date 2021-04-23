@@ -11,3 +11,7 @@ make netcfg-my-l2-v2
 make mn-cli
 make stop
 ```
+
+```
+h1 iperf -c h6 -u -b1M -P5 -t60 -i1
+```

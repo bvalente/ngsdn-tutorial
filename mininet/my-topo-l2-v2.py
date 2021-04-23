@@ -14,7 +14,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-import argparse
+import argparse, time, threading
 
 from mininet.cli import CLI
 from mininet.log import setLogLevel
@@ -25,10 +25,19 @@ from stratum import StratumBmv2Switch
 
 CPU_PORT = 255
 
+# Perform ARP Request for the gateway every 30 sec
+def scheduleARP(host, gw):
+    while(True):
+        time.sleep(30)
+        try:
+            host.cmd('arping %s &> /dev/null &' % gw)
+        except Exception:
+            pass
 
 class IPv4Host(Host):
     """Host that can be configured with an IPv4 gateway (default route).
     """
+
 
     def config(self, mac=None, ip=None, defaultRoute=None, lo='up', gw=None,
                **_params):
@@ -39,12 +48,16 @@ class IPv4Host(Host):
         self.cmd('ip -4 addr add %s dev %s' % (ip, self.defaultIntf()))
         if gw:
             self.cmd('ip -4 route add default via %s' % gw)
-            self.cmd('arping -W 60 %s > /dev/null &' % gw) #periodic arp to gateway
+            # self.cmd('arping -W 60 %s > /dev/null &' % gw) #periodic arp to gateway
+            threading.Thread(target=scheduleARP, args=(self, gw,)).start() #make non-blocking
+
         # Disable offload
         for attr in ["rx", "tx", "sg"]:
             cmd = "/sbin/ethtool --offload %s %s off" % (
                 self.defaultIntf(), attr)
             self.cmd(cmd)
+
+
 
         def updateIP():
             return ip.split('/')[0]
