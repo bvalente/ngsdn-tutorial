@@ -39,7 +39,8 @@ RUN pip install --no-cache-dir --root /output $PIP_DEPS
 FROM opennetworking/mn-stratum:latest@$MN_STRATUM_SHA as runtime
 
 ENV RUNTIME_DEPS \
-    make
+    make \
+    iptables
 RUN install_packages $RUNTIME_DEPS
 
 COPY --from=builder /output /
