@@ -19,6 +19,10 @@ services:
       - "50004:50004"
       - "50005:50005"
       - "50006:50006"
+    networks:
+      default:
+      nat:
+        ipv4_address: 172.16.100.2
       
     # NGSDN_TOPO_PY is a Python-based Mininet script defining the topology. Its
     # value is passed to docker-compose as an environment variable, defined in
@@ -35,5 +39,12 @@ services:
       - ./tmp/onos:/root/onos/apache-karaf-4.2.8/data/tmp
     environment:
       - ONOS_APPS=gui2,drivers.bmv2,lldpprovider,hostprovider
-    links:
-      - mininet
+    networks:
+      - default
+
+networks:
+  default:
+  nat:
+    ipam:
+      config:
+        - subnet: 172.16.100.0/24

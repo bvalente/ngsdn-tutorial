@@ -20,6 +20,7 @@ from mininet.cli import CLI
 from mininet.log import setLogLevel
 from mininet.net import Mininet
 from mininet.node import Host
+from mininet.link import Intf
 from mininet.topo import Topo
 from stratum import StratumBmv2Switch
 
@@ -30,7 +31,7 @@ def scheduleARP(host, gw):
     while(True):
         time.sleep(30)
         try:
-            host.cmd('arping %s &> /dev/null &' % gw)
+            host.cmd('arping -c 1 %s &> /dev/null &' % gw)
         except Exception:
             pass
 
@@ -48,7 +49,6 @@ class IPv4Host(Host):
         self.cmd('ip -4 addr add %s dev %s' % (ip, self.defaultIntf()))
         if gw:
             self.cmd('ip -4 route add default via %s' % gw)
-            # self.cmd('arping -W 60 %s > /dev/null &' % gw) #periodic arp to gateway
             threading.Thread(target=scheduleARP, args=(self, gw,)).start() #make non-blocking
 
         # Disable offload
@@ -126,8 +126,25 @@ class TutorialTopo(Topo):
         self.addLink(h6, leaf3)  # port 4
 
 
+def addNAT(net):
+    """Custom node with dedicated interface and iptable rules"""
+    nat = net.addHost('nat')
+
+    net.addLink('spine1', nat)
+
+    nat.cmd('ip -4 addr flush dev %s', nat.defaultIntf())
+    nat.cmd('ip -6 addr flush dev %s', nat.defaultIntf())
+    Intf('eth1', nat)
+    nat.cmd('ip addr add 172.16.100.2/24 dev eth1')
+    nat.cmd('ip route add default via 172.168.100.1 dev eth1')
+
+    #TODO install iptables rules
+    #TODO install p4 flow rules
+
+
 def main():
     net = Mininet(topo=TutorialTopo(), controller=None)
+    addNAT(net)
     net.start()
     CLI(net)
     net.stop()
