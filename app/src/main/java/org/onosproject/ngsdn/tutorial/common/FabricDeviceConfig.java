@@ -31,10 +31,11 @@ public class FabricDeviceConfig extends Config<DeviceId> {
     private static final String MY_STATION_MAC = "myStationMac";
     private static final String MY_SID = "mySid";
     private static final String IS_SPINE = "isSpine";
+    private static final String GATEWAY_PORT = "gatewayPort";
 
     @Override
     public boolean isValid() {
-        return hasOnlyFields(MY_STATION_MAC, MY_SID, IS_SPINE) &&
+        return hasOnlyFields(MY_STATION_MAC, MY_SID, IS_SPINE, GATEWAY_PORT) &&
                 myStationMac() != null &&
                 get(MY_SID, null) != null; //avoid Invalid IPv4/IPv6 exception
     }
@@ -78,5 +79,16 @@ public class FabricDeviceConfig extends Config<DeviceId> {
     public boolean isSpine() {
         String isSpine = get(IS_SPINE, null);
         return isSpine != null && Boolean.valueOf(isSpine);
+    }
+
+    /**
+     * Get the Gateway Port of the switch.
+     * 
+     * @return -1 if the switch does not have a gateway port. else returns
+     * the number of the gateway port
+     */
+    public int gatewayPort() {
+        String gatewayPort = get(GATEWAY_PORT, null);
+        return gatewayPort != null ? Integer.valueOf(gatewayPort) : -2;
     }
 }

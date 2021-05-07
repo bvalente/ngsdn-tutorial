@@ -12,7 +12,8 @@
 		"fabricDeviceConfig": {
 			"myStationMac": "00:aa:00:00:00:01",
 			"mySid": "10.0.10.255",
-			"isSpine": false
+			"isSpine": false,
+			"gatewayPort": -1
 		  }
 	  },
 	  "device:leaf2": {
@@ -27,7 +28,8 @@
 		"fabricDeviceConfig": {
 			"myStationMac": "00:aa:00:00:00:02",
 			"mySid": "10.0.20.255",
-			"isSpine": false
+			"isSpine": false,
+			"gatewayPort": -1
 		  }
 	  },
 	  "device:leaf3": {
@@ -42,7 +44,8 @@
 		"fabricDeviceConfig": {
 			"myStationMac": "00:aa:00:00:00:03",
 			"mySid": "10.0.30.255",
-			"isSpine": false
+			"isSpine": false,
+			"gatewayPort": -1
 		  }
 	  },
 	  "device:spine1": {
@@ -57,7 +60,8 @@
 		"fabricDeviceConfig": {
 			"myStationMac": "00:bb:00:00:00:01",
 			"mySid": "10.0.100.1",
-			"isSpine": true
+			"isSpine": true,
+			"gatewayPort": 4
 		  }
 	  },
 	  "device:spine2": {
@@ -72,7 +76,8 @@
 		"fabricDeviceConfig": {
 			"myStationMac": "00:bb:00:00:00:02",
 			"mySid": "10.0.100.2",
-			"isSpine": true
+			"isSpine": true,
+			"gatewayPort": -1
 		  }
 	  },
 	  "device:spine3": {
@@ -87,11 +92,23 @@
 		"fabricDeviceConfig": {
 			"myStationMac": "00:bb:00:00:00:03",
 			"mySid": "10.0.100.3",
-			"isSpine": true
+			"isSpine": true,
+			"gatewayPort": -1
 		  }
 	  }
 	},
 	"ports": {
+	  "device:spine1/4": {
+		"interfaces": [
+		  {
+			"name": "spine1-4",
+			"ips": [
+			  "10.0.100.1/16"
+			],
+			"vlan-untagged": 100
+		  }
+		]
+      },
 	  "device:leaf1/4": {
 		"interfaces": [
 		  {

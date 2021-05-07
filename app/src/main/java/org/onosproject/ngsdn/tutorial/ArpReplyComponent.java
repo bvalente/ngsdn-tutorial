@@ -203,6 +203,8 @@ public class ArpReplyComponent {
             .map(Device::id)
             .collect(Collectors.toSet());
         
+        log.info("Adding ARP rules for device {} in [{}]", deviceId, devices);
+
         // Create flowRules for each switch
         Collection<FlowRule> flowRules = new ArrayList<FlowRule>();
         

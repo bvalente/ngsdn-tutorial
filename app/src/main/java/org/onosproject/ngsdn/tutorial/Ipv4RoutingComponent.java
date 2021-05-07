@@ -216,6 +216,52 @@ public class Ipv4RoutingComponent {
     }
 
     /**
+     * TODO: description
+    */
+    private void setUpGateway(DeviceId deviceId) {
+
+        int gatewayPort = getGatewayPort(deviceId);
+        log.info("gateway debug {}", Integer.toString(gatewayPort));
+        if (gatewayPort < 0){
+            return;
+        }
+
+        log.info("Found switch with gateway! {}", gatewayPort);
+        final Collection<Interface> interfaces = interfaceService.getInterfaces()
+                .stream()
+                .filter(iface -> iface.connectPoint().deviceId().equals(deviceId))
+                .collect(Collectors.toSet());
+        
+        if (interfaces.isEmpty()){
+            log.info("No interface found");
+            return;
+        }
+        PortNumber port = null;
+        for (Interface intf : interfaces) {
+            log.info("Interface with port number {}", intf.connectPoint().port().toLong());
+            //TODO test!
+            if (intf.connectPoint().port().toLong() == gatewayPort){
+                port = intf.connectPoint().port();
+            }
+        }
+        // port = interfaces.iterator().next().connectPoint().port();
+        if (port == null){
+            log.info("No port found");
+            return;
+        } else {
+            log.info("Adding gateway for {} with {[]} interfaces", deviceId, interfaces.size());
+        }
+
+        //l2_exact_table
+        //hdr.ethernet.dst_addr: mac
+        //egress_port: gatewayPort
+        MacAddress deviceMac = getMyStationMac(deviceId);
+        FlowRule gatewayFlowRule = createL2NextHopRule(deviceId, deviceMac, port);
+
+        flowRuleService.applyFlowRules(gatewayFlowRule);
+    }
+
+    /**
      * Creates an ONOS SELECT group for the routing table to provide ECMP
      * forwarding for the given collection of next hop MAC addresses. ONOS
      * SELECT groups are equivalent to P4Runtime action selector groups.
@@ -460,6 +506,7 @@ public class Ipv4RoutingComponent {
                 DeviceId deviceId = event.subject().id();
                 log.info("{} event! device id={}", event.type(), deviceId);
                 setUpMyStationTable(deviceId);
+                setUpGateway(deviceId);
             });
         }
     }
@@ -881,6 +928,13 @@ public class Ipv4RoutingComponent {
                         "Missing mySid config for " + deviceId));
     }
 
+    private int getGatewayPort(DeviceId deviceId) {
+        return getDeviceConfig(deviceId)
+                .map(FabricDeviceConfig::gatewayPort)
+                .orElseThrow(() -> new ItemNotFoundException(
+                        "Missing gatewayPort for " + deviceId));
+    }
+
     /**
      * Sets up IPv6 routing on all devices known by ONOS and for which this ONOS
      * node instance is currently master.
@@ -893,6 +947,7 @@ public class Ipv4RoutingComponent {
                 .forEach(deviceId -> {
                     log.info("*** IPV4 ROUTING - Starting initial set up for {}...", deviceId);
                     setUpMyStationTable(deviceId);
+                    setUpGateway(deviceId);
                     setUpFabricRoutes(deviceId);
                     setUpL2NextHopRules(deviceId);
                     hostService.getConnectedHosts(deviceId)
