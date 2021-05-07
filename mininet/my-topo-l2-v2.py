@@ -128,23 +128,63 @@ class TutorialTopo(Topo):
 
 def addNAT(net):
     """Custom node with dedicated interface and iptable rules"""
-    nat = net.addHost('nat')
 
+    subnet = '10.0.0.0/16'
+    inetIntf = 'eth1'
+
+    nat = net.addHost('nat', mac="00:bb:00:00:00:01")
     net.addLink('spine1', nat)
+    Intf(inetIntf, nat)
 
-    nat.cmd('ip -4 addr flush dev %s', nat.defaultIntf())
-    nat.cmd('ip -6 addr flush dev %s', nat.defaultIntf())
-    Intf('eth1', nat)
-    nat.cmd('ip addr add 172.16.100.2/24 dev eth1')
-    nat.cmd('ip route add default via 172.168.100.1 dev eth1')
+    # Configure interfaces
+    nat.cmd('ip -4 addr flush dev %s' % nat.defaultIntf())
+    nat.cmd('ip -6 addr flush dev %s' % nat.defaultIntf())
+    nat.cmd('ip -4 link set up %s' % nat.defaultIntf())
+    nat.cmd('ip addr add 172.16.100.2/24 dev %s' % inetIntf)
+    nat.cmd('ip route add default via 172.16.100.1 dev %s' % inetIntf)
 
-    #TODO install iptables rules
-    #TODO install p4 flow rules
+    # nat.cmd('sysctl net.ipv4.ip_forward=0')
+    # Flush any currently active rules
+    nat.cmd('iptables -F')
+    nat.cmd('iptables -t nat -F')
+    # Create default entries for unmatched traffic
+    nat.cmd('iptables -P INPUT ACCEPT')
+    nat.cmd('iptables -P OUTPUT ACCEPT')
+    nat.cmd('iptables -P FORWARD DROP')
+
+    # Install NAT rules
+    nat.cmd('iptables -I FORWARD',
+            '-i', nat.defaultIntf(), '-d', subnet, '-j DROP')
+    nat.cmd('iptables -A FORWARD',
+            '-i', nat.defaultIntf(), '-s', subnet, '-j ACCEPT')
+    nat.cmd('iptables -A FORWARD',
+            '-i', inetIntf, '-d', subnet, '-j ACCEPT')
+    nat.cmd('iptables -t nat -A POSTROUTING',
+            '-o', inetIntf, '-s', subnet, '-j MASQUERADE')
+    
+    # Instruct the kernel to perform forwarding
+    nat.cmd( 'sysctl net.ipv4.ip_forward=1' )
+
+    for attr in ["rx", "tx", "sg"]:
+            cmd = "/sbin/ethtool --offload %s %s off" % (
+                nat.defaultIntf(), attr)
+            nat.cmd(cmd)
+
+    #DONE install iptables rules
+    #DONE install p4 flow rules
+
+def addNATv2(net):
+    """Connect spine1 to new docker interface"""
+
+    for switch in net.switches:
+        if switch.name == 'spine1':    
+            Intf('eth1', switch)
 
 
 def main():
     net = Mininet(topo=TutorialTopo(), controller=None)
     addNAT(net)
+    # addNATv2(net)
     net.start()
     CLI(net)
     net.stop()
