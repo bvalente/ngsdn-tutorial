@@ -22,7 +22,7 @@ services:
     networks:
       default:
       nat:
-        ipv4_address: 10.0.100.254
+        ipv4_address: 172.16.100.2
       
     # NGSDN_TOPO_PY is a Python-based Mininet script defining the topology. Its
     # value is passed to docker-compose as an environment variable, defined in
@@ -47,4 +47,4 @@ networks:
   nat:
     ipam:
       config:
-        - subnet: 10.0.0.0/16
+        - subnet: 172.16.100.0/24

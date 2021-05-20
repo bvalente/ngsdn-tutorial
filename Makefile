@@ -49,6 +49,9 @@ start-my-l2: _start
 start-my-l2-v2: NGSDN_TOPO_PY := my-topo-l2-v2.py
 start-my-l2-v2: _start
 
+start-my-nat: NGSDN_TOPO_PY := my-topo-nat.py
+start-my-nat: _start
+
 start-v6: NGSDN_TOPO_PY := topo-v6.py
 start-v6: _start
 
@@ -100,6 +103,9 @@ netcfg-my-l2: _netcfg
 
 netcfg-my-l2-v2: NGSDN_NETCFG_JSON := my-netcfg-l2-v2.json
 netcfg-my-l2-v2: _netcfg
+
+netcfg-my-nat: NGSDN_NETCFG_JSON := my-netcfg-nat.json
+netcfg-my-nat: _netcfg
 
 netcfg-v6: NGSDN_NETCFG_JSON := netcfg.json
 netcfg-v6: _netcfg
