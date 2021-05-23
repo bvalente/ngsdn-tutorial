@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+ //VXLAN credit to https://github.com/P4-Research/p4-demos
+
 
 #include <core.p4>
 #include <v1model.p4>
@@ -36,6 +38,14 @@
 // Required for Exercise 7.
 #define SRV6_MAX_HOPS 4
 
+// Constants for VXLAN packet encapsulation
+#define ETH_HDR_SIZE 14
+#define IPV4_HDR_SIZE 20
+#define UDP_HDR_SIZE 8
+#define VXLAN_HDR_SIZE 8
+#define IP_VERSION_4 4
+#define IPV4_MIN_IHL 5
+
 typedef bit<9>   port_num_t;
 typedef bit<48>  mac_addr_t;
 typedef bit<16>  mcast_group_id_t;
@@ -52,6 +62,8 @@ const bit<8> IP_PROTO_TCP    = 6;
 const bit<8> IP_PROTO_UDP    = 17;
 const bit<8> IP_PROTO_SRV6   = 43;
 const bit<8> IP_PROTO_ICMPV6 = 58;
+
+const bit<16> UDP_PORT_VXLAN = 4789;
 
 const bit<16> ARP_REQUEST     = 1;
 const bit<16> ARP_REPLY       = 2;
@@ -176,6 +188,13 @@ header arp_t {
     bit<32>   protoDstAddr;
 }
 
+header vxlan_t {
+    bit<8>  flags;
+    bit<24> reserved;
+    bit<24> vni;
+    bit<8>  reserved_2;
+}
+
 // Packet-in header. Prepended to packets sent to the CPU_PORT and used by the
 // P4Runtime server (Stratum) to populate the PacketIn message metadata fields.
 // Here we use it to carry the original ingress port where the packet was
@@ -210,6 +229,10 @@ struct parsed_headers_t {
     icmpv6_t icmpv6;
     ndp_t ndp;
     arp_t arp;
+
+    vxlan_t vxlan;
+    ethernet_t inner_ethernet;
+    ipv4_t inner_ipv4;
 }
 
 struct local_metadata_t {
@@ -219,7 +242,10 @@ struct local_metadata_t {
     ipv6_addr_t next_srv6_sid;
     bit<8>      ip_proto;
     bit<8>      icmp_type;
-    bit<16>      arp_op;
+    bit<16>     arp_op;
+    bit<24>     vxlan_vni;
+    bit<32>     nexthop;
+    bit<32>     vtepIP;
 }
 
 
@@ -294,6 +320,27 @@ parser ParserImpl (packet_in packet,
         packet.extract(hdr.udp);
         local_metadata.l4_src_port = hdr.udp.src_port;
         local_metadata.l4_dst_port = hdr.udp.dst_port;
+        transition select(hdr.udp.dst_port) {
+            UDP_PORT_VXLAN: parse_vxlan;
+            default: accept;
+        }
+    }
+
+    state parse_vxlan {
+        packet.extract(hdr.vxlan);
+        transition parse_inner_ethernet;
+    }
+
+    state parse_inner_ethernet {
+        packet.extract(hdr.inner_ethernet);
+        transition select(hdr.inner_ethernet.ether_type){
+            ETHERTYPE_IPV4: parse_inner_ipv4;
+            default: accept;
+        }
+    }
+
+    state parse_inner_ipv4 {
+        packet.extract(hdr.inner_ipv4);
         transition accept;
     }
 
@@ -449,6 +496,172 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
     }
 
     // MY EXERCISE
+
+    // VXLAN
+
+    // VXLAN Ingress Upstream
+
+    action vxlan_decap() {
+        // set outter headers as invalid
+        // hdr.ethernet.setInvalid();
+        // hdr.ipv4.setInvalid();
+        // hdr.udp.setInvalid();
+        // hdr.vxlan.setInvalid();
+
+        // merge headers for L2 routing
+        hdr.ethernet = hdr.inner_ethernet;
+        hdr.ipv4 = hdr.inner_ipv4;
+        hdr.udp.setInvalid();
+        hdr.vxlan.setInvalid();
+        hdr.inner_ethernet.setInvalid();
+        hdr.inner_ipv4.setInvalid();
+    }
+
+    table vxlan_term_table {
+        key = {
+            hdr.inner_ethernet.dst_addr: exact;
+        }
+
+        actions = {
+            @defaultonly NoAction;
+            vxlan_decap();
+        }
+    }
+
+    // same as set_egress_port
+    // action forward(bit<9> port) {
+    //     standard_metadata.egress_spec = port;
+    // }
+
+    // same as l2_exact_table
+    // table t_forward_l2 {
+    //     key = {
+    //         hdr.inner_ethernet.dst_addr : exact;
+    //     }
+
+    //     actions = {
+    //         forward;
+    //     }
+    // }
+
+    // VXLAN Egress Upstream
+
+    // No Action
+
+    // VXLAN Ingress Downstream
+
+    action set_vni(bit<24> vni) {
+        local_metadata.vxlan_vni = vni;
+    }
+
+
+    table vxlan_segment_table {
+        key = {
+            hdr.ipv4.dstAddr: lpm;
+        }
+        actions = {
+            @defaultonly NoAction;
+            set_vni;
+        }
+    }
+
+    action set_ipv4_nexthop(bit<32> nexthop) {
+        local_metadata.nexthop = nexthop;
+    }
+
+    table vxlan_nexthop_table {
+        key = {
+            hdr.ethernet.dst_addr: exact;
+        }
+        actions = {
+            set_ipv4_nexthop;
+        }
+    }
+
+    action set_vtep_ip(bit<32> vtep_ip) {
+        local_metadata.vtepIP = vtep_ip;
+    }
+
+    table vtep_table {
+        key = {
+            hdr.ethernet.src_addr: exact;
+        }
+        actions = {
+            set_vtep_ip;
+        }
+    }
+
+    // same as set_egress_port
+    // action route(bit<9> port) {
+    //     standard_metadata.egress_spec = port;
+    // }
+
+    // mix of l2_exact_table and routing_v4_table
+    // table vxlan_routing {
+    //     key = {
+    //         local_metadata.nexthop: exact;
+    //     }
+    //     actions = {
+    //         route;
+    //     }
+    // }
+
+    // VXLAN Egress Downstream
+
+    // action rewrite_macs(bit<48> smac, bit<48> dmac) {
+    //     hdr.ethernet.src_addr = smac;
+    //     hdr.ethernet.dst_addr = dmac;
+    // }
+
+    // table t_send_frame {
+    //     key = {
+    //         hdr.ipv4.dst_addr : exact;
+    //     }
+    //     actions = {
+    //         rewrite_macs;
+    //     }
+    // }
+
+    action vxlan_encap() {
+
+        hdr.inner_ethernet = hdr.ethernet;
+        hdr.inner_ipv4 = hdr.ipv4;
+
+        hdr.ethernet.setValid();
+
+        hdr.ipv4.setValid();
+        hdr.ipv4.version = IP_VERSION_4;
+        hdr.ipv4.ihl = IPV4_MIN_IHL;
+        // hdr.ipv4.diffserv = 0;
+        hdr.ipv4.dscp = 0;
+        hdr.ipv4.ecn = 0;
+        hdr.ipv4.total_len = hdr.ipv4.total_len
+                            + (ETH_HDR_SIZE + IPV4_HDR_SIZE + UDP_HDR_SIZE + VXLAN_HDR_SIZE);
+        hdr.ipv4.identification = 0x1513; /* From NGIC */
+        hdr.ipv4.flags = 0;
+        hdr.ipv4.frag_offset = 0;
+        hdr.ipv4.ttl = 64;
+        hdr.ipv4.protocol = UDP_PROTO;
+        hdr.ipv4.dst_addr = local_metadata.nexthop;
+        hdr.ipv4.src_addr = local_metadata.vtepIP;
+        hdr.ipv4.hdrChecksum = 0;
+
+        hdr.udp.setValid();
+        // The VTEP calculates the source port by performing the hash of the inner Ethernet frame's header.
+        hash(hdr.udp.src_port, HashAlgorithm.crc16, (bit<13>)0, { hdr.inner_ethernet }, (bit<32>)65536);
+        hdr.udp.dst_port = UDP_PORT_VXLAN;
+        hdr.udp.len = hdr.ipv4.total_len + (UDP_HDR_SIZE + VXLAN_HDR_SIZE);
+        hdr.udp.checksum = 0;
+
+        hdr.vxlan.setValid();
+        hdr.vxlan.reserved = 0;
+        hdr.vxlan.reserved_2 = 0;
+        hdr.vxlan.flags = 0;
+        hdr.vxlan.vni = local_metadata.vxlan_vni;
+
+    }
+
+    // L2
 
     action_selector(HashAlgorithm.crc16, 32w1024, 32w16) ecmp_selector_l2;
 
@@ -710,6 +923,9 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
             // somewhere between checking the switch's my station table and
             // applying the routing table.
 
+            bool do_ipv4 = false;
+
+            // Gateway
             if(my_station_table.apply().hit) {
 
                 if(hdr.ipv6.isValid()) {
@@ -719,10 +935,34 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 
                 } else if(hdr.ipv4.isValid()) {
 
-                    routing_v4_table.apply();
-                    if(hdr.ipv4.ttl == 0) { drop(); }
+                    // VXLAN Upstream
+                    if (hdr.vxlan.isValid()){
+                        
+                        // Decapsulate and route L2
+                        vxlan_term_table.apply();
+
+                    } else {
+
+                        // Default IPv4 routing
+                        do_ipv4 = true;
+                    }
                 }
+            } else if(hdr.ipv4.isValid()) {
                 
+                // VXLAN Downstream
+                vtep_table.apply();
+                if(vxlan_segment_table.apply().hit){
+                    if(vxlan_nexthop_table.apply().hit){
+                        vxlan_encap(); // encapsulate
+                        do_ipv4 = true;
+                    }
+                }
+            }
+
+            if (do_ipv4 == true){
+
+                routing_v4_table.apply();
+                if(hdr.ipv4.ttl == 0) { drop(); }
             }
 
             //first hit ecmp, then normal table, then ternary
@@ -820,6 +1060,9 @@ control DeparserImpl(packet_out packet, in parsed_headers_t hdr) {
         packet.emit(hdr.icmpv6);
         packet.emit(hdr.ndp);
         packet.emit(hdr.arp);
+        packet.emit(hdr.vxlan);
+        packet.emit(hdr.inner_ethernet);
+        packet.emit(hdr.inner_ipv4);
     }
 }
 
