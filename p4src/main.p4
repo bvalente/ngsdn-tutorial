@@ -557,7 +557,7 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 
     table vxlan_segment_table {
         key = {
-            hdr.ipv4.dstAddr: lpm;
+            hdr.ipv4.dst_addr: lpm;
         }
         actions = {
             @defaultonly NoAction;
@@ -641,10 +641,10 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         hdr.ipv4.flags = 0;
         hdr.ipv4.frag_offset = 0;
         hdr.ipv4.ttl = 64;
-        hdr.ipv4.protocol = UDP_PROTO;
+        hdr.ipv4.protocol = IP_PROTO_UDP;
         hdr.ipv4.dst_addr = local_metadata.nexthop;
         hdr.ipv4.src_addr = local_metadata.vtepIP;
-        hdr.ipv4.hdrChecksum = 0;
+        hdr.ipv4.hdr_checksum = 0;
 
         hdr.udp.setValid();
         // The VTEP calculates the source port by performing the hash of the inner Ethernet frame's header.
