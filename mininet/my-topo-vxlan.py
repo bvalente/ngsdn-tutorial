@@ -26,22 +26,15 @@ from stratum import StratumBmv2Switch
 
 CPU_PORT = 255
 
-# Perform ARP Request for the gateway every 30 sec
-def scheduleARP(host, gw):
+# Perform ARP Reply every 30 sec
+def scheduleArpReply(host, int, ip):
     while(True):
         time.sleep(30)
         try:
-            host.cmd('arping -c 1 %s &> /dev/null &' % gw)
+            host.cmd('arping -P -i %s -U %s &> /dev/null &' % (intf, ip))
         except Exception:
             pass
 
-def scheduleARP_NAT(nat, intf, ip):
-    while(True):
-        time.sleep(30)
-        try:
-            nat.cmd('arping -P -i %s -U %s &> /dev/null &' % (intf, ip))
-        except Exception:
-            pass
 
 class IPv4Host(Host):
     """Host that can be configured with an IPv4 gateway (default route).
@@ -57,15 +50,13 @@ class IPv4Host(Host):
         self.cmd('ip -4 addr add %s dev %s' % (ip, self.defaultIntf()))
         if gw:
             self.cmd('ip -4 route add default via %s' % gw)
-            threading.Thread(target=scheduleARP, args=(self, gw,)).start() #make non-blocking
+            threading.Thread(target=scheduleArpReply, args=(self, self.defaultIntf(), ip,)).start() #make non-blocking
 
         # Disable offload
         for attr in ["rx", "tx", "sg"]:
             cmd = "/sbin/ethtool --offload %s %s off" % (
                 self.defaultIntf(), attr)
             self.cmd(cmd)
-
-
 
         def updateIP():
             return ip.split('/')[0]
@@ -82,26 +73,58 @@ class TutorialTopo(Topo):
         # Leaves
         # gRPC port 50001
         leaf1 = self.addSwitch('leaf1', cls=StratumBmv2Switch, cpuport=CPU_PORT)
+        # gRPC port 50002
+        leaf2 = self.addSwitch('leaf2', cls=StratumBmv2Switch, cpuport=CPU_PORT)
+        # gRPC port 50003
+        leaf3 = self.addSwitch('leaf3', cls=StratumBmv2Switch, cpuport=CPU_PORT)
+
+        # Spines
+        # gRPC port 50004
+        spine1 = self.addSwitch('spine1', cls=StratumBmv2Switch, cpuport=CPU_PORT)
+        # gRPC port 50005
+        spine2 = self.addSwitch('spine2', cls=StratumBmv2Switch, cpuport=CPU_PORT)
+        # gRPC port 50006
+        spine3 = self.addSwitch('spine3', cls=StratumBmv2Switch, cpuport=CPU_PORT)
+
+
+        # Switch Links
+        self.addLink(spine1, leaf1)
+        self.addLink(spine1, leaf2)
+        self.addLink(spine2, leaf1)
+        self.addLink(spine2, leaf2)
+        # extended
+        self.addLink(spine1, leaf3) #update spine1
+        self.addLink(spine2, leaf3) #update spine2
+        self.addLink(spine3, leaf1)
+        self.addLink(spine3, leaf2)
+        self.addLink(spine3, leaf3)
 
         # IPv4 hosts attached to leaf 1
         h1 = self.addHost('h1', cls=IPv4Host, mac="00:00:00:00:00:10",
-                           ip='10.0.0.1/16', gw='10.0.0.254')
-    	
-        self.addLink(h1, leaf1)  # port 1
+                           ip='10.10.0.1/16', gw='10.10.0.254')
+        h2 = self.addHost('h2', cls=IPv4Host, mac="00:00:00:00:00:20",
+                           ip='10.20.0.2/16', gw='10.20.0.254')
+        self.addLink(h1, leaf1)  # port 3
+        self.addLink(h2, leaf1)  # port 4
+
+        # extended
+        # IPv4 hosts attached to leaf 3
+        h3 = self.addHost('h3', cls=IPv4Host, mac="00:00:00:00:00:30",
+                          ip='10.10.0.3/16', gw='10.10.0.254')
+        self.addLink(h3, leaf3)  # port 3
 
 
 def addNAT(net):
     """Custom node with dedicated interface and iptable rules"""
 
-    subnet = '10.0.0.0/16'
+    subnet = '10.20.0.0/16'
     inetIntf = 'eth1'
     inetIp = '172.16.100.2'
     lanIntf = ''
-    lanIp = '10.0.0.254'
+    lanIp = '10.20.0.254'
 
-    nat = net.addHost('nat', mac="00:ff:00:00:00:01") #!
-    # nat = net.addHost('nat')
-    net.addLink('leaf1', nat)
+    nat = net.addHost('nat')
+    net.addLink('leaf2', nat)
     Intf(inetIntf, nat)
     
     lanIntf = nat.defaultIntf()
@@ -122,13 +145,11 @@ def addNAT(net):
     nat.cmd('ip route add default via 172.16.100.1 dev %s' % inetIntf)
 
     # periodic arp
-    # threading.Thread(target=scheduleARP, args=(nat, "255.255.255.255 -i nat-eth0",)).start() #!
-    threading.Thread(target=scheduleARP_NAT, args=(nat, nat.defaultIntf(), lanIp)).start()
+    threading.Thread(target=scheduleArpReply, args=(nat, nat.defaultIntf(), lanIp)).start()
 
     # Instruct the kernel to perform forwarding
     nat.cmd('sysctl net.ipv4.ip_forward=1' )
 
-    # nat.cmd('sysctl net.ipv4.ip_forward=0') #!
     # Flush any currently active rules
     nat.cmd('iptables -F')
     nat.cmd('iptables -t nat -F')

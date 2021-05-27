@@ -37,7 +37,7 @@ _start:
 	@mkdir -p tmp/onos
 	@NGSDN_TOPO_PY=${NGSDN_TOPO_PY} docker-compose up -d
 
-start: NGSDN_TOPO_PY := my-topo-l2-v2.py
+start: NGSDN_TOPO_PY := my-topo-vxlan.py
 start: _start
 
 start-my-v4: NGSDN_TOPO_PY := my-topo-v4.py
@@ -51,6 +51,9 @@ start-my-l2-v2: _start
 
 start-my-nat: NGSDN_TOPO_PY := my-topo-nat.py
 start-my-nat: _start
+
+start-my-vxlan: NGSDN_TOPO_PY := my-topo-vxlan.py
+start-my-vxlan: _start
 
 start-v6: NGSDN_TOPO_PY := topo-v6.py
 start-v6: _start
