@@ -27,7 +27,7 @@ from stratum import StratumBmv2Switch
 CPU_PORT = 255
 
 # Perform ARP Reply every 30 sec
-def scheduleArpReply(host, int, ip):
+def scheduleArpReply(host, intf, ip):
     while(True):
         time.sleep(30)
         try:
