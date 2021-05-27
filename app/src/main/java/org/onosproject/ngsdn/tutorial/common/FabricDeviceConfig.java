@@ -103,7 +103,7 @@ public class FabricDeviceConfig extends Config<DeviceId> {
         return gatewayPort != null ? Integer.valueOf(gatewayPort) : -2;
     }
 
-    public List<VxlanConfig> vxlanConfig() {
+    public List<VxlanConfig> vxlan() {
 
         List<VxlanConfig> list = Lists.newArrayList();
         ArrayNode arrayNode = (ArrayNode) object.path(VXLAN);

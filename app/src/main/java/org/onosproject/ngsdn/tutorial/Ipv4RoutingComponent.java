@@ -952,6 +952,8 @@ public class Ipv4RoutingComponent {
                     setUpL2NextHopRules(deviceId);
                     hostService.getConnectedHosts(deviceId)
                             .forEach(host -> setUpHostRules(deviceId, host));
+                    hostService.getConnectedHosts(deviceId)
+                        .forEach(host -> blackMagic(host));
                 });
     }
 }
