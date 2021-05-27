@@ -2,6 +2,7 @@
 tmp/
 p4src/build
 app/target
+app/bin
 app/src/main/resources/p4info.txt
 app/src/main/resources/bmv2.json
 ptf/stratum_bmv2.log
