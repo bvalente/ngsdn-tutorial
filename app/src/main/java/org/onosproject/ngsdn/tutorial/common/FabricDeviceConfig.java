@@ -16,11 +16,21 @@
 
 package org.onosproject.ngsdn.tutorial.common;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import com.google.common.collect.Lists;
+
 import org.onlab.packet.Ip4Address;
 import org.onlab.packet.Ip6Address;
 import org.onlab.packet.MacAddress;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.config.Config;
+
+
+import java.util.List;
 
 /**
  * Device configuration object for the IPv6 fabric tutorial application.
@@ -32,10 +42,11 @@ public class FabricDeviceConfig extends Config<DeviceId> {
     private static final String MY_SID = "mySid";
     private static final String IS_SPINE = "isSpine";
     private static final String GATEWAY_PORT = "gatewayPort";
+    private static final String VXLAN = "vxlan";
 
     @Override
     public boolean isValid() {
-        return hasOnlyFields(MY_STATION_MAC, MY_SID, IS_SPINE, GATEWAY_PORT) &&
+        return hasOnlyFields(MY_STATION_MAC, MY_SID, IS_SPINE, GATEWAY_PORT, VXLAN) &&
                 myStationMac() != null &&
                 get(MY_SID, null) != null; //avoid Invalid IPv4/IPv6 exception
     }
@@ -90,5 +101,13 @@ public class FabricDeviceConfig extends Config<DeviceId> {
     public int gatewayPort() {
         String gatewayPort = get(GATEWAY_PORT, null);
         return gatewayPort != null ? Integer.valueOf(gatewayPort) : -2;
+    }
+
+    public List<VxlanConfig> vxlanConfig() {
+
+        List<VxlanConfig> list = Lists.newArrayList();
+        ArrayNode arrayNode = (ArrayNode) object.path(VXLAN);
+        arrayNode.forEach(i -> list.add(new VxlanConfig(i)));
+        return list;
     }
 }
