@@ -90,11 +90,10 @@ class TutorialTopo(Topo):
         # Switch Links
         self.addLink(spine1, leaf1)
         self.addLink(spine1, leaf2)
+        self.addLink(spine1, leaf3)
         self.addLink(spine2, leaf1)
         self.addLink(spine2, leaf2)
-        # extended
-        self.addLink(spine1, leaf3) #update spine1
-        self.addLink(spine2, leaf3) #update spine2
+        self.addLink(spine2, leaf3)
         self.addLink(spine3, leaf1)
         self.addLink(spine3, leaf2)
         self.addLink(spine3, leaf3)
@@ -104,14 +103,14 @@ class TutorialTopo(Topo):
                            ip='10.10.0.1/16', gw='10.10.0.254')
         h2 = self.addHost('h2', cls=IPv4Host, mac="00:00:00:00:00:20",
                            ip='10.20.0.2/16', gw='10.20.0.254')
-        self.addLink(h1, leaf1)  # port 3
-        self.addLink(h2, leaf1)  # port 4
+        self.addLink(h1, leaf1)  # port 4
+        self.addLink(h2, leaf1)  # port 5
 
         # extended
         # IPv4 hosts attached to leaf 3
         h3 = self.addHost('h3', cls=IPv4Host, mac="00:00:00:00:00:30",
                           ip='10.10.0.3/16', gw='10.10.0.254')
-        self.addLink(h3, leaf3)  # port 3
+        self.addLink(h3, leaf3)  # port 4
 
 
 def addNAT(net):
@@ -123,7 +122,7 @@ def addNAT(net):
     lanIntf = ''
     lanIp = '10.20.0.254'
 
-    nat = net.addHost('nat')
+    nat = net.addHost('nat', mac="00:00:00:00:00:99")
     net.addLink('leaf2', nat)
     Intf(inetIntf, nat)
     

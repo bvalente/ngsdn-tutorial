@@ -923,60 +923,94 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
             // somewhere between checking the switch's my station table and
             // applying the routing table.
 
-            bool do_ipv4 = false;
+            // bool do_ipv4 = false;
 
-            // Gateway
-            if(my_station_table.apply().hit) {
+            // // Gateway
+            // if(my_station_table.apply().hit) {
 
-                if(hdr.ipv6.isValid()) {
+            //     if(hdr.ipv6.isValid()) {
                     
-                    routing_v6_table.apply();
-                    if(hdr.ipv6.hop_limit == 0) { drop(); }
+            //         routing_v6_table.apply();
+            //         if(hdr.ipv6.hop_limit == 0) { drop(); }
 
-                } else if(hdr.ipv4.isValid()) {
+            //     } else if(hdr.ipv4.isValid()) {
 
-                    // VXLAN Upstream
-                    if (hdr.vxlan.isValid()){
+            //         // VXLAN Upstream
+            //         if (hdr.vxlan.isValid()){
                         
-                        // Decapsulate and route L2
+            //             // Decapsulate and route L2
+            //             vxlan_term_table.apply();
+
+            //         } else {
+
+            //             // Default IPv4 routing
+            //             do_ipv4 = true;
+            //         }
+            //     }
+            // } else if(hdr.ipv4.isValid()) {
+                
+            //     // VXLAN Downstream
+            //     vtep_table.apply();
+            //     if(vxlan_segment_table.apply().hit){
+            //         if(vxlan_nexthop_table.apply().hit){
+            //             vxlan_encap(); // encapsulate
+            //             do_ipv4 = true;
+            //         }
+            //     }
+            // }
+
+            // if (do_ipv4 == true){
+
+            //     routing_v4_table.apply();
+            //     if(hdr.ipv4.ttl == 0) { drop(); }
+            // }
+
+            // //first hit ecmp, then normal table, then ternary
+
+            // //1:20am, im tired
+            // if (!l2_exact_table_ecmp.apply().hit) {
+
+            //     // L2 bridging logic. Apply the exact table first...
+            //     if (!l2_exact_table.apply().hit) {
+            //         // ...if an entry is NOT found, apply the ternary one in case
+            //         // this is a multicast/broadcast NDP NS packet.
+            //         l2_ternary_table.apply();
+            //     }
+
+            // }
+
+            // IPv4 packet
+            if (hdr.ipv4.isValid()) {
+
+                // Switch supports this segment
+                if (vxlan_segment_table.apply().hit) {
+
+                    // Upstream
+                    if (hdr.vxlan.isValid()) {
+
+                        // Decapsulate packet
                         vxlan_term_table.apply();
 
+                        // Route L2
+                        l2_exact_table.apply();
+                    
                     } else {
 
-                        // Default IPv4 routing
-                        do_ipv4 = true;
+                        // TODO check if mac is connected
+
+                        // Find next hop
+                        if(vxlan_nexthop_table.apply().hit){
+                        
+                            // Encapsulate packet
+                            vxlan_encap();
+
+                            // Route ECMP Ipv4
+                            routing_v4_table.apply();
+                            if(hdr.ipv4.ttl == 0) { drop(); }
+
+                        }
                     }
                 }
-            } else if(hdr.ipv4.isValid()) {
-                
-                // VXLAN Downstream
-                vtep_table.apply();
-                if(vxlan_segment_table.apply().hit){
-                    if(vxlan_nexthop_table.apply().hit){
-                        vxlan_encap(); // encapsulate
-                        do_ipv4 = true;
-                    }
-                }
-            }
-
-            if (do_ipv4 == true){
-
-                routing_v4_table.apply();
-                if(hdr.ipv4.ttl == 0) { drop(); }
-            }
-
-            //first hit ecmp, then normal table, then ternary
-
-            //1:20am, im tired
-            if (!l2_exact_table_ecmp.apply().hit) {
-
-                // L2 bridging logic. Apply the exact table first...
-                if (!l2_exact_table.apply().hit) {
-                    // ...if an entry is NOT found, apply the ternary one in case
-                    // this is a multicast/broadcast NDP NS packet.
-                    l2_ternary_table.apply();
-                }
-
             }
 
         }
