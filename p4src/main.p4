@@ -501,20 +501,29 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 
     // VXLAN Ingress Upstream
 
+    action vxlan_de_decap() {
+        // set outter headers as valid
+        hdr.ethernet.setValid();
+        hdr.ipv4.setValid();
+        hdr.udp.setValid();
+        hdr.vxlan.setValid();
+
+    }
+
     action vxlan_decap() {
         // set outter headers as invalid
-        // hdr.ethernet.setInvalid();
-        // hdr.ipv4.setInvalid();
-        // hdr.udp.setInvalid();
-        // hdr.vxlan.setInvalid();
-
-        // merge headers for L2 routing
-        hdr.ethernet = hdr.inner_ethernet;
-        hdr.ipv4 = hdr.inner_ipv4;
+        hdr.ethernet.setInvalid();
+        hdr.ipv4.setInvalid();
         hdr.udp.setInvalid();
         hdr.vxlan.setInvalid();
-        hdr.inner_ethernet.setInvalid();
-        hdr.inner_ipv4.setInvalid();
+
+        // merge headers for L2 routing
+        // hdr.ethernet = hdr.inner_ethernet;
+        // hdr.ipv4 = hdr.inner_ipv4;
+        // hdr.udp.setInvalid();
+        // hdr.vxlan.setInvalid();
+        // hdr.inner_ethernet.setInvalid();
+        // hdr.inner_ipv4.setInvalid();
     }
 
     table vxlan_term_table {
@@ -553,6 +562,12 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
     action set_vni(bit<24> vni) {
         local_metadata.vxlan_vni = vni;
     }
+    
+    action set_vxlan(bit<24> vni, bit<32> vtep_ip, bit<32> nexthop) {
+        local_metadata.vxlan_vni = vni;
+        local_metadata.vtepIP = vtep_ip;
+        local_metadata.nexthop = nexthop;
+    }
 
 
     table vxlan_segment_table {
@@ -560,9 +575,12 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
             hdr.ipv4.dst_addr: lpm;
         }
         actions = {
-            @defaultonly NoAction;
-            set_vni;
+            // @defaultonly NoAction;
+            // set_vni;
+            set_vxlan;
         }
+        @name("vxlan_segment_table_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
     }
 
     action set_ipv4_nexthop(bit<32> nexthop) {
@@ -912,105 +930,74 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 
         if (do_l3_l2) {
 
-            // *** DONE EXERCISE 5
-            // Insert logic to match the My Station table and upon hit, the
-            // routing table. You should also add a conditional to drop the
-            // packet if the hop_limit reaches 0.
-
-            // *** TODO EXERCISE 6
-            // Insert logic to match the SRv6 My SID and Transit tables as well
-            // as logic to perform PSP behavior. HINT: This logic belongs
-            // somewhere between checking the switch's my station table and
-            // applying the routing table.
-
-            // bool do_ipv4 = false;
-
-            // // Gateway
-            // if(my_station_table.apply().hit) {
-
-            //     if(hdr.ipv6.isValid()) {
-                    
-            //         routing_v6_table.apply();
-            //         if(hdr.ipv6.hop_limit == 0) { drop(); }
-
-            //     } else if(hdr.ipv4.isValid()) {
-
-            //         // VXLAN Upstream
-            //         if (hdr.vxlan.isValid()){
-                        
-            //             // Decapsulate and route L2
-            //             vxlan_term_table.apply();
-
-            //         } else {
-
-            //             // Default IPv4 routing
-            //             do_ipv4 = true;
-            //         }
-            //     }
-            // } else if(hdr.ipv4.isValid()) {
-                
-            //     // VXLAN Downstream
-            //     vtep_table.apply();
-            //     if(vxlan_segment_table.apply().hit){
-            //         if(vxlan_nexthop_table.apply().hit){
-            //             vxlan_encap(); // encapsulate
-            //             do_ipv4 = true;
-            //         }
-            //     }
-            // }
-
-            // if (do_ipv4 == true){
-
-            //     routing_v4_table.apply();
-            //     if(hdr.ipv4.ttl == 0) { drop(); }
-            // }
-
-            // //first hit ecmp, then normal table, then ternary
-
-            // //1:20am, im tired
-            // if (!l2_exact_table_ecmp.apply().hit) {
-
-            //     // L2 bridging logic. Apply the exact table first...
-            //     if (!l2_exact_table.apply().hit) {
-            //         // ...if an entry is NOT found, apply the ternary one in case
-            //         // this is a multicast/broadcast NDP NS packet.
-            //         l2_ternary_table.apply();
-            //     }
-
-            // }
-
             // IPv4 packet
             if (hdr.ipv4.isValid()) {
 
-                // Switch supports this segment
-                if (vxlan_segment_table.apply().hit) {
+                bool inTransit = false;
+                ethernet_t aux_ether = hdr.ethernet;
+                ipv4_t aux_ipv4 = hdr.ipv4;
+                udp_t aux_udp = hdr.udp;
+                vxlan_t aux_vxlan = hdr.vxlan;
+                ethernet_t aux_i_ether = hdr.inner_ethernet;
+                ipv4_t aux_i_ipv4 = hdr.inner_ipv4;
 
-                    // Upstream
-                    if (hdr.vxlan.isValid()) {
+                // Upstream
+                if (hdr.vxlan.isValid()) {
 
-                        // Decapsulate packet
-                        vxlan_term_table.apply();
+                    // Decapsulate packet
+                    // vxlan_decap();
+                    inTransit = true;
+                    // set values
+                    hdr.ethernet = hdr.inner_ethernet;
+                    hdr.ipv4 = hdr.inner_ipv4;
+                    // set invalid
+                    hdr.udp.setInvalid();
+                    hdr.vxlan.setInvalid();
+                    hdr.inner_ethernet.setInvalid();
+                    hdr.inner_ipv4.setInvalid();
 
-                        // Route L2
-                        l2_exact_table.apply();
-                    
-                    } else {
-
-                        // TODO check if mac is connected
-
-                        // Find next hop
-                        if(vxlan_nexthop_table.apply().hit){
-                        
-                            // Encapsulate packet
-                            vxlan_encap();
-
-                            // Route ECMP Ipv4
-                            routing_v4_table.apply();
-                            if(hdr.ipv4.ttl == 0) { drop(); }
-
-                        }
-                    }
                 }
+
+                // Segment hit
+                if (vxlan_segment_table.apply().hit){
+
+                    // Not in transit, encap
+                    if (!inTransit) {
+
+                        vxlan_encap();
+
+                    }
+
+                    //In transit, do nothing
+
+                } else if (inTransit) {
+
+                    // Segment not hit, undo decap
+                    // setValid
+                    hdr.udp.setValid();
+                    hdr.vxlan.setValid();
+                    hdr.inner_ethernet.setValid();
+                    hdr.inner_ipv4.setValid();
+                    // set values
+                    hdr.ethernet = aux_ether;
+                    hdr.ipv4 = aux_ipv4;
+                    hdr.udp = aux_udp;
+                    hdr.vxlan = aux_vxlan;
+                    hdr.inner_ethernet = aux_i_ether;
+                    hdr.inner_ipv4 = aux_i_ipv4;
+                }
+
+            }
+
+            if (!l2_exact_table_ecmp.apply().hit) {
+
+                // L2 bridging logic. Apply the exact table first...
+                if (!l2_exact_table.apply().hit) {
+                    // ...if an entry is NOT found, apply the ternary one in case
+                    // this is a multicast/broadcast NDP NS packet.
+                    l2_ternary_table.apply();
+                }
+
             }
 
         }
@@ -1090,13 +1077,13 @@ control DeparserImpl(packet_out packet, in parsed_headers_t hdr) {
         packet.emit(hdr.srv6_list);
         packet.emit(hdr.tcp);
         packet.emit(hdr.udp);
+        packet.emit(hdr.vxlan);
+        packet.emit(hdr.inner_ethernet);
+        packet.emit(hdr.inner_ipv4);
         packet.emit(hdr.icmp);
         packet.emit(hdr.icmpv6);
         packet.emit(hdr.ndp);
         packet.emit(hdr.arp);
-        packet.emit(hdr.vxlan);
-        packet.emit(hdr.inner_ethernet);
-        packet.emit(hdr.inner_ipv4);
     }
 }
 
