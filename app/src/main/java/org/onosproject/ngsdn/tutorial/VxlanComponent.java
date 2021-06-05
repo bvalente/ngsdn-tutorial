@@ -210,6 +210,19 @@ public class VxlanComponent {
             flowRuleService.applyFlowRules(
                 Utils.buildFlowRule( deviceId, appId, segmentTable, segmentMatch, segmentAction)
             );
+
+            // Set own vtep
+            PiCriterion vtepMatch = PiCriterion.builder()
+                .matchExact(
+                    PiMatchFieldId.of("hdr.ipv4.dst_addr"),
+                    vtepIp.toOctets())
+                .build();
+            PiTableAction NoAction = PiAction.builder()
+                .withId(PiActionId.of("NoAction"))
+                .build();
+            flowRuleService.applyFlowRules(
+                Utils.buildFlowRule(deviceId, appId, "IngressPipeImpl.my_vtep", vtepMatch, NoAction)
+            );
         }
     }
 

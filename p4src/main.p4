@@ -218,6 +218,12 @@ header cpu_out_header_t {
 struct parsed_headers_t {
     cpu_out_header_t cpu_out;
     cpu_in_header_t cpu_in;
+
+    ethernet_t outer_ethernet;
+    ipv4_t outer_ipv4;
+    udp_t outer_udp;
+    vxlan_t outer_vxlan;
+
     ethernet_t ethernet;
     ipv4_t ipv4;
     ipv6_t ipv6;
@@ -232,7 +238,8 @@ struct parsed_headers_t {
 
     vxlan_t vxlan;
     ethernet_t inner_ethernet;
-    ipv4_t inner_ipv4;
+    // ipv4_t inner_ipv4;
+    // udp_t inner_udp;
 }
 
 struct local_metadata_t {
@@ -333,16 +340,25 @@ parser ParserImpl (packet_in packet,
 
     state parse_inner_ethernet {
         packet.extract(hdr.inner_ethernet);
-        transition select(hdr.inner_ethernet.ether_type){
-            ETHERTYPE_IPV4: parse_inner_ipv4;
-            default: accept;
-        }
-    }
-
-    state parse_inner_ipv4 {
-        packet.extract(hdr.inner_ipv4);
+        // transition select(hdr.inner_ethernet.ether_type){
+        //     ETHERTYPE_IPV4: parse_inner_ipv4;
+        //     default: accept;
+        // }
         transition accept;
     }
+
+    // state parse_inner_ipv4 {
+    //     packet.extract(hdr.inner_ipv4);
+    //     transition select(hdr.inner_ipv4.protocol) {
+    //         IP_PROTO_UDP: parse_inner_udp;
+    //         default: accept;
+    //     }
+    // }
+
+    // state parse_inner_udp {
+    //     packet.extract(hdr.inner_udp);
+    //     transition accept;
+    // }
 
     state parse_icmp {
         packet.extract(hdr.icmp);
@@ -609,6 +625,17 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         }
     }
 
+    table my_vtep {
+        key = {
+            hdr.ipv4.dst_addr: exact;
+        }
+        actions = {
+            NoAction;
+        }
+        @name("my_vtep_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
     // same as set_egress_port
     // action route(bit<9> port) {
     //     standard_metadata.egress_spec = port;
@@ -640,42 +667,43 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
     //     }
     // }
 
-    action vxlan_encap() {
 
-        hdr.inner_ethernet = hdr.ethernet;
-        hdr.inner_ipv4 = hdr.ipv4;
 
-        hdr.ethernet.setValid();
+    action vxlan_encap_v2() {
 
-        hdr.ipv4.setValid();
-        hdr.ipv4.version = IP_VERSION_4;
-        hdr.ipv4.ihl = IPV4_MIN_IHL;
-        // hdr.ipv4.diffserv = 0;
-        hdr.ipv4.dscp = 0;
-        hdr.ipv4.ecn = 0;
-        hdr.ipv4.total_len = hdr.ipv4.total_len
-                            + (ETH_HDR_SIZE + IPV4_HDR_SIZE + UDP_HDR_SIZE + VXLAN_HDR_SIZE);
-        hdr.ipv4.identification = 0x1513; /* From NGIC */
-        hdr.ipv4.flags = 0;
-        hdr.ipv4.frag_offset = 0;
-        hdr.ipv4.ttl = 64;
-        hdr.ipv4.protocol = IP_PROTO_UDP;
-        hdr.ipv4.dst_addr = local_metadata.nexthop;
-        hdr.ipv4.src_addr = local_metadata.vtepIP;
-        hdr.ipv4.hdr_checksum = 0;
+        hdr.outer_ethernet.setValid();
+        hdr.outer_ethernet.src_addr = hdr.ethernet.src_addr;
+        hdr.outer_ethernet.dst_addr = hdr.ethernet.dst_addr;
+        hdr.outer_ethernet.ether_type = hdr.ethernet.ether_type;
 
-        hdr.udp.setValid();
-        // The VTEP calculates the source port by performing the hash of the inner Ethernet frame's header.
-        hash(hdr.udp.src_port, HashAlgorithm.crc16, (bit<13>)0, { hdr.inner_ethernet }, (bit<32>)65536);
-        hdr.udp.dst_port = UDP_PORT_VXLAN;
-        hdr.udp.len = hdr.ipv4.total_len + (UDP_HDR_SIZE + VXLAN_HDR_SIZE);
-        hdr.udp.checksum = 0;
+        hdr.outer_ipv4.setValid();
+        hdr.outer_ipv4.version = IP_VERSION_4;
+        hdr.outer_ipv4.ihl = IPV4_MIN_IHL;
+        hdr.outer_ipv4.dscp = 0;
+        hdr.outer_ipv4.ecn = 0;
+        // hdr.outer_ipv4.total_len = ETH_HDR_SIZE + IPV4_HDR_SIZE + UDP_HDR_SIZE + VXLAN_HDR_SIZE;
+        hdr.outer_ipv4.total_len = IPV4_HDR_SIZE + UDP_HDR_SIZE + VXLAN_HDR_SIZE + ETH_HDR_SIZE + hdr.ipv4.total_len;
+        hdr.outer_ipv4.identification = 0x1513;
+        hdr.outer_ipv4.flags = 0;
+        hdr.outer_ipv4.frag_offset = 0;
+        hdr.outer_ipv4.ttl = 64;
+        hdr.outer_ipv4.protocol = IP_PROTO_UDP;
+        hdr.outer_ipv4.hdr_checksum = 0;
+        hdr.outer_ipv4.src_addr = local_metadata.vtepIP;
+        hdr.outer_ipv4.dst_addr = local_metadata.nexthop;
 
-        hdr.vxlan.setValid();
-        hdr.vxlan.reserved = 0;
-        hdr.vxlan.reserved_2 = 0;
-        hdr.vxlan.flags = 0;
-        hdr.vxlan.vni = local_metadata.vxlan_vni;
+        hdr.outer_udp.setValid();
+        // hdr.outer_udp.src_port = udp_src_port;
+        hash(hdr.outer_udp.src_port, HashAlgorithm.crc16, (bit<13>)0, { hdr.ethernet }, (bit<32>)65536);
+        hdr.outer_udp.dst_port = UDP_PORT_VXLAN;
+        hdr.outer_udp.len = UDP_HDR_SIZE + VXLAN_HDR_SIZE + ETH_HDR_SIZE + hdr.ipv4.total_len;
+        hdr.outer_udp.checksum = 0;
+
+        hdr.outer_vxlan.setValid();
+        hdr.outer_vxlan.reserved = 0;
+        hdr.outer_vxlan.reserved_2 = 0;
+        hdr.outer_vxlan.flags = 0;
+        hdr.outer_vxlan.vni = local_metadata.vxlan_vni;
 
     }
 
@@ -933,58 +961,18 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
             // IPv4 packet
             if (hdr.ipv4.isValid()) {
 
-                bool inTransit = false;
-                ethernet_t aux_ether = hdr.ethernet;
-                ipv4_t aux_ipv4 = hdr.ipv4;
-                udp_t aux_udp = hdr.udp;
-                vxlan_t aux_vxlan = hdr.vxlan;
-                ethernet_t aux_i_ether = hdr.inner_ethernet;
-                ipv4_t aux_i_ipv4 = hdr.inner_ipv4;
+                if (vxlan_segment_table.apply().hit) {
 
-                // Upstream
-                if (hdr.vxlan.isValid()) {
+                    vxlan_encap_v2();
 
-                    // Decapsulate packet
-                    // vxlan_decap();
-                    inTransit = true;
-                    // set values
+                } else if (my_vtep.apply().hit && hdr.vxlan.isValid()) {
+                    
+                    // hdr.ethernet.setInvalid();
                     hdr.ethernet = hdr.inner_ethernet;
-                    hdr.ipv4 = hdr.inner_ipv4;
-                    // set invalid
+                    hdr.ipv4.setInvalid();
                     hdr.udp.setInvalid();
                     hdr.vxlan.setInvalid();
                     hdr.inner_ethernet.setInvalid();
-                    hdr.inner_ipv4.setInvalid();
-
-                }
-
-                // Segment hit
-                if (vxlan_segment_table.apply().hit){
-
-                    // Not in transit, encap
-                    if (!inTransit) {
-
-                        vxlan_encap();
-
-                    }
-
-                    //In transit, do nothing
-
-                } else if (inTransit) {
-
-                    // Segment not hit, undo decap
-                    // setValid
-                    hdr.udp.setValid();
-                    hdr.vxlan.setValid();
-                    hdr.inner_ethernet.setValid();
-                    hdr.inner_ipv4.setValid();
-                    // set values
-                    hdr.ethernet = aux_ether;
-                    hdr.ipv4 = aux_ipv4;
-                    hdr.udp = aux_udp;
-                    hdr.vxlan = aux_vxlan;
-                    hdr.inner_ethernet = aux_i_ether;
-                    hdr.inner_ipv4 = aux_i_ipv4;
                 }
 
             }
@@ -1070,6 +1058,12 @@ control ComputeChecksumImpl(inout parsed_headers_t hdr,
 control DeparserImpl(packet_out packet, in parsed_headers_t hdr) {
     apply {
         packet.emit(hdr.cpu_in);
+
+        packet.emit(hdr.outer_ethernet);
+        packet.emit(hdr.outer_ipv4);
+        packet.emit(hdr.outer_udp);
+        packet.emit(hdr.outer_vxlan);
+
         packet.emit(hdr.ethernet);
         packet.emit(hdr.ipv4);
         packet.emit(hdr.ipv6);
@@ -1079,7 +1073,8 @@ control DeparserImpl(packet_out packet, in parsed_headers_t hdr) {
         packet.emit(hdr.udp);
         packet.emit(hdr.vxlan);
         packet.emit(hdr.inner_ethernet);
-        packet.emit(hdr.inner_ipv4);
+        // packet.emit(hdr.inner_ipv4);
+        // packet.emit(hdr.inner_udp);
         packet.emit(hdr.icmp);
         packet.emit(hdr.icmpv6);
         packet.emit(hdr.ndp);

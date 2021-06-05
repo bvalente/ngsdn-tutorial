@@ -31,7 +31,7 @@ def scheduleArpReply(host, intf, ip):
     while(True):
         time.sleep(30)
         try:
-            host.cmd('arping -P -i %s -U %s &> /dev/null &' % (intf, ip))
+            host.cmd('arping -P -i %s -U %s -c 1 &> /dev/null &' % (intf, ip))
         except Exception:
             pass
 
@@ -50,7 +50,7 @@ class IPv4Host(Host):
         self.cmd('ip -4 addr add %s dev %s' % (ip, self.defaultIntf()))
         if gw:
             self.cmd('ip -4 route add default via %s' % gw)
-            threading.Thread(target=scheduleArpReply, args=(self, self.defaultIntf(), ip,)).start() #make non-blocking
+            threading.Thread(target=scheduleArpReply, args=(self, self.defaultIntf(), ip.split('/')[0],)).start() #make non-blocking
 
         # Disable offload
         for attr in ["rx", "tx", "sg"]:
