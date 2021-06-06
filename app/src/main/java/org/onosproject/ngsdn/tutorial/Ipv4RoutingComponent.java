@@ -64,6 +64,7 @@ import org.osgi.service.component.annotations.Reference;
 import org.osgi.service.component.annotations.ReferenceCardinality;
 import org.onosproject.ngsdn.tutorial.common.FabricDeviceConfig;
 import org.onosproject.ngsdn.tutorial.common.Utils;
+import org.onosproject.ngsdn.tutorial.common.VxlanConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -374,6 +375,32 @@ public class Ipv4RoutingComponent {
                 deviceId, appId, tableId, match, action);
     }
 
+    private FlowRule createVtepNextHopRule(DeviceId deviceId, Ip4Address nexthopIp,
+                                            PortNumber outPort) {
+
+        // *** DONE EXERCISE 5
+        // Modify P4Runtime entity names to match content of P4Info file (look
+        // for the fully qualified name of tables, match fields, and actions.
+        // ---- START SOLUTION ----
+        final String tableId = "IngressPipeImpl.routing_vtep_table";
+        final PiCriterion match = PiCriterion.builder()
+            .matchExact(PiMatchFieldId.of("hdr.ipv4.dst_addr"),
+            nexthopIp.toOctets())
+            .build();
+
+
+        final PiAction action = PiAction.builder()
+            .withId(PiActionId.of("IngressPipeImpl.set_egress_port"))
+            .withParameter(new PiActionParam(
+            PiActionParamId.of("port_num"),
+            outPort.toLong()))
+            .build();
+            // ---- END SOLUTION ----
+
+        return Utils.buildFlowRule(
+            deviceId, appId, tableId, match, action);
+    }
+
     //--------------------------------------------------------------------------
     // EVENT LISTENERS
     //
@@ -418,7 +445,7 @@ public class Ipv4RoutingComponent {
                 setUpHostRules(deviceId, host);
 
                 //my code!
-                blackMagic(host);
+                // blackMagic(host);
             });
         }
     }
@@ -507,6 +534,8 @@ public class Ipv4RoutingComponent {
                 log.info("{} event! device id={}", event.type(), deviceId);
                 setUpMyStationTable(deviceId);
                 setUpGateway(deviceId);
+
+                blackMagic(deviceId);
             });
         }
     }
@@ -518,18 +547,18 @@ public class Ipv4RoutingComponent {
     // policy, responsible of computing paths and creating ECMP groups.
     //--------------------------------------------------------------------------
 
-    private FlowRule createBlackMagicRule(DeviceId deviceId, MacAddress mac,
+    private FlowRule createBlackMagicRule(DeviceId deviceId, Ip4Address ip,
                                        int groupId) {
 
         // *** DONE EXERCISE 5
         // Modify P4Runtime entity names to match content of P4Info file (look
         // for the fully qualified name of tables, match fields, and actions.
         // ---- START SOLUTION ----
-        final String tableId = "IngressPipeImpl.l2_exact_table_ecmp";
+        final String tableId = "IngressPipeImpl.routing_vtep_ecmp_table";
         final PiCriterion match = PiCriterion.builder()
                 .matchExact(
-                        PiMatchFieldId.of("hdr.ethernet.dst_addr"),
-                        mac.toBytes())
+                        PiMatchFieldId.of("hdr.outer_ipv4.dst_addr"),
+                        ip.toOctets())
                 .build();
 
         final PiTableAction action = PiActionProfileGroupId.of(groupId);
@@ -543,7 +572,7 @@ public class Ipv4RoutingComponent {
                                                 Collection<PortNumber> ports,
                                                 DeviceId deviceId) {
 
-        String actionProfileId = "IngressPipeImpl.ecmp_selector_l2";
+        String actionProfileId = "IngressPipeImpl.ecmp_selector_vtep";
 
         final List<PiAction> actions = Lists.newArrayList();
 
@@ -552,7 +581,7 @@ public class Ipv4RoutingComponent {
         // Modify P4Runtime entity names to match content of P4Info file (look
         // for the fully qualified name of tables, match fields, and actions.
         // ---- START SOLUTION ----
-        final String tableId = "IngressPipeImpl.l2_exact_table_ecmp";
+        final String tableId = "IngressPipeImpl.routing_vtep_ecmp_table";
         for (PortNumber port : ports) {
             final PiAction action = PiAction.builder()
                     .withId(PiActionId.of("IngressPipeImpl.set_egress_port"))
@@ -572,56 +601,67 @@ public class Ipv4RoutingComponent {
     }
 
     //setup rules for l2 routing
-    private void blackMagic(Host host){
+    private void blackMagic(DeviceId deviceId){
 
-        //master device
-        DeviceId master = host.location().deviceId();
+        final List<VxlanConfig> vxlanConfigList = getDeviceConfig(deviceId).map(FabricDeviceConfig::vxlan)
+            .orElseThrow(() -> new ItemNotFoundException(
+                "Missing vxlan config for " + deviceId));
 
-        //get master's spines
-        Collection<ConnectPoint> spinesCP = linkService.getDeviceIngressLinks(master).stream()
-            .map(Link::src)
-            .filter(cp -> this.isSpine(cp.deviceId()))
-            .collect(Collectors.toSet());
-        
-        //install routes in all spines
-        Collection<FlowRule> lules = spinesCP.stream()
-            .map(cp -> createL2NextHopRule(cp.deviceId(), host.mac(), cp.port()) )
-            .collect(Collectors.toSet());
-        
-        lules.forEach(flowRuleService::applyFlowRules);
-
-
-        //get all devices except master and send to spines
-        Collection<DeviceId> links = stream(deviceService.getAvailableDevices())
-            .map(Device::id)
-            .filter(dv -> !dv.equals(master))
-            .filter(this::isLeaf)
-            .collect(Collectors.toSet());
-            // .map(linkService::getDeviceEgressLinks);
-        
-        
-
-        int groupId = macToGroupId(host.mac());
-        // int groupId = DEFAULT_ECMP_GROUP_ID;
-
-        for (DeviceId dv : links) {
+        for (VxlanConfig vxlanConfig : vxlanConfigList) {
             
-            //for dv get all ports leading to spines
-            Collection<PortNumber> ports = linkService.getDeviceEgressLinks(dv).stream()
-                // .map(Link::src)
-                .filter(lk -> this.isSpine(lk.dst().deviceId()))
+            Ip4Address vtepIp = vxlanConfig.vtepIp;
+
+
+            //master device
+            DeviceId master = deviceId;
+    
+            //get master's spines
+            Collection<ConnectPoint> spinesCP = linkService.getDeviceIngressLinks(master).stream()
                 .map(Link::src)
-                .map(ConnectPoint::port)
+                .filter(cp -> this.isSpine(cp.deviceId()))
                 .collect(Collectors.toSet());
-
-            GroupDescription ecmpGroup = createBlackMagicGroup(
-                groupId, ports, dv);
             
-            List<FlowRule> flowRules = new LinkedList<FlowRule>();
-            FlowRule rule = createBlackMagicRule(dv, host.mac(), groupId);
-            flowRules.add(rule);
-            insertInOrder(ecmpGroup, flowRules);
+            //install routes in all spines
+            Collection<FlowRule> lules = spinesCP.stream()
+                .map(cp -> createVtepNextHopRule(cp.deviceId(), vtepIp, cp.port()) )
+                .collect(Collectors.toSet());
+            
+            lules.forEach(flowRuleService::applyFlowRules);
+    
+    
+            //get all devices except master and send to spines
+            Collection<DeviceId> links = stream(deviceService.getAvailableDevices())
+                .map(Device::id)
+                .filter(dv -> !dv.equals(master))
+                .filter(this::isLeaf)
+                .collect(Collectors.toSet());
+                // .map(linkService::getDeviceEgressLinks);
+            
+            
+    
+            int groupId = ipToGroupId(vtepIp);
+            // int groupId = DEFAULT_ECMP_GROUP_ID;
+    
+            for (DeviceId dv : links) {
+                
+                //for dv get all ports leading to spines
+                Collection<PortNumber> ports = linkService.getDeviceEgressLinks(dv).stream()
+                    // .map(Link::src)
+                    .filter(lk -> this.isSpine(lk.dst().deviceId()))
+                    .map(Link::src)
+                    .map(ConnectPoint::port)
+                    .collect(Collectors.toSet());
+    
+                GroupDescription ecmpGroup = createBlackMagicGroup(
+                    groupId, ports, dv);
+                
+                List<FlowRule> flowRules = new LinkedList<FlowRule>();
+                FlowRule rule = createBlackMagicRule(dv, vtepIp, groupId);
+                flowRules.add(rule);
+                insertInOrder(ecmpGroup, flowRules);
+            }
         }
+
 
         //get direct device and add l2_exact_table entry
         //done somewhere else
@@ -895,6 +935,10 @@ public class Ipv4RoutingComponent {
         return mac.hashCode() & 0x7fffffff;
     }
 
+    private int ipToGroupId(Ip4Address ip) {
+        return ip.hashCode() & 0x7fffffff;
+    }
+
     /**
      * Inserts the given groups and flow rules in order, groups first, then flow
      * rules. In P4Runtime, when operating on an indirect table (i.e. with
@@ -952,8 +996,9 @@ public class Ipv4RoutingComponent {
                     setUpL2NextHopRules(deviceId);
                     hostService.getConnectedHosts(deviceId)
                             .forEach(host -> setUpHostRules(deviceId, host));
-                    hostService.getConnectedHosts(deviceId)
-                        .forEach(host -> blackMagic(host));
+                    // hostService.getConnectedHosts(deviceId)
+                    //     .forEach(host -> blackMagic(host));
+                    blackMagic(deviceId);
                 });
     }
 }

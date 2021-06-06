@@ -588,7 +588,8 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 
     table vxlan_segment_table {
         key = {
-            hdr.ipv4.dst_addr: lpm;
+            hdr.ipv4.src_addr: lpm;
+            // hdr.ipv4.dst_addr: lpm;
         }
         actions = {
             // @defaultonly NoAction;
@@ -777,6 +778,32 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         }
         implementation = ecmp_selector_v4;
         @name("routing_v4_table_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
+    action_selector(HashAlgorithm.crc16, 32w1024, 32w16) ecmp_selector_vtep;
+
+    table routing_vtep_ecmp_table {
+        key = {
+            hdr.outer_ipv4.dst_addr: exact;
+            local_metadata.l4_dst_port: selector;
+        }
+        actions = {
+            set_egress_port;
+        }
+        implementation = ecmp_selector_vtep;
+        @name("routing_vtep_ecmp_table")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
+    table routing_vtep_table {
+        key = {
+            hdr.ipv4.dst_addr: exact;
+        }
+        actions = {
+            set_egress_port;
+        }
+        @name("routing_vtep_table")
         counters = direct_counter(CounterType.packets_and_bytes);
     }
 
@@ -977,13 +1004,21 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 
             }
 
-            if (!l2_exact_table_ecmp.apply().hit) {
+            if (!routing_vtep_ecmp_table.apply().hit) {
 
-                // L2 bridging logic. Apply the exact table first...
-                if (!l2_exact_table.apply().hit) {
-                    // ...if an entry is NOT found, apply the ternary one in case
-                    // this is a multicast/broadcast NDP NS packet.
-                    l2_ternary_table.apply();
+                if (!routing_vtep_table.apply().hit) {
+
+                    if (!l2_exact_table_ecmp.apply().hit) {
+
+                        // L2 bridging logic. Apply the exact table first...
+                        if (!l2_exact_table.apply().hit) {
+                            // ...if an entry is NOT found, apply the ternary one in case
+                            // this is a multicast/broadcast NDP NS packet.
+                            l2_ternary_table.apply();
+                        }
+
+                    }
+
                 }
 
             }

@@ -187,9 +187,13 @@ public class VxlanComponent {
             String segmentTable = "IngressPipeImpl.vxlan_segment_table";
             PiCriterion segmentMatch = PiCriterion.builder()
                     .matchLpm(
-                        PiMatchFieldId.of("hdr.ipv4.dst_addr"),
+                        PiMatchFieldId.of("hdr.ipv4.src_addr"),
                         segmentPrefix.address().toOctets(),
                         segmentPrefix.prefixLength())
+                    // .matchLpm(
+                    //     PiMatchFieldId.of("hdr.ipv4.dst_addr"),
+                    //     segmentPrefix.address().toOctets(),
+                    //     segmentPrefix.prefixLength())
                     .build();
             
             List<PiActionParam> params = new LinkedList<PiActionParam>();
