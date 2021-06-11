@@ -219,8 +219,11 @@ struct local_metadata_t {
     ipv6_addr_t next_srv6_sid;
     bit<8>      ip_proto;
     bit<8>      icmp_type;
-    bit<16>      arp_op;
+    bit<16>     arp_op;
+    bit<4>      next_server;
 }
+
+register<bit<4>>(1) next_server_register;
 
 
 //------------------------------------------------------------------------------
@@ -521,6 +524,52 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         counters = direct_counter(CounterType.packets_and_bytes);
     }
 
+    //load balancing
+
+    table my_virtual_ip_table {
+        key = {
+            hdr.ipv4.dst_addr: exact;
+        }
+        actions = {
+            NoAction;
+        }
+        @name("my_virtual_ip_table_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
+
+    action set_next_server(mac_addr_t mac, bit<32> ip) {
+        hdr.ethernet.dst_addr = mac;
+        hdr.ipv4.dst_addr = ip;
+    }
+
+    table load_balancer_table {
+        key = {
+            local_metadata.next_server: exact;
+        }
+        actions = {
+            set_next_server;
+        }
+        @name("load_balancer_table_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
+    action unset_server(mac_addr_t mac, bit<32> ip){
+        hdr.ethernet.src_addr = mac;
+        hdr.ipv4.src_addr = ip;
+    }
+
+    table unset_server_table {
+        key = {
+            hdr.ipv4.src_addr: exact;
+        }
+        actions = {
+            unset_server;
+        }
+        @name("unset_server_table_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
 
     // *** DONE EXERCISE 5 (IPV6 ROUTING)
     //
@@ -699,30 +748,20 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 
         if (do_l3_l2) {
 
-            // *** DONE EXERCISE 5
-            // Insert logic to match the My Station table and upon hit, the
-            // routing table. You should also add a conditional to drop the
-            // packet if the hop_limit reaches 0.
+            if ( my_virtual_ip_table.apply().hit ) {
 
-            // *** TODO EXERCISE 6
-            // Insert logic to match the SRv6 My SID and Transit tables as well
-            // as logic to perform PSP behavior. HINT: This logic belongs
-            // somewhere between checking the switch's my station table and
-            // applying the routing table.
+                //dest is server. change dst mac and ip
+                next_server_register.read(local_metadata.next_server, (bit<32>)0);
 
-            if(my_station_table.apply().hit) {
+                load_balancer_table.apply(); //reads meta.next_server
 
-                if(hdr.ipv6.isValid()) {
-                    
-                    routing_v6_table.apply();
-                    if(hdr.ipv6.hop_limit == 0) { drop(); }
+                next_server_register.write((bit<32>)0, local_metadata.next_server + (bit<4>)1); //overflow
 
-                } else if(hdr.ipv4.isValid()) {
+            } else {
+                //response from server
+                //unset mac and ip
 
-                    routing_v4_table.apply();
-                    if(hdr.ipv4.ttl == 0) { drop(); }
-                }
-                
+                unset_server_table.apply();
             }
 
             //first hit ecmp, then normal table, then ternary
@@ -800,6 +839,54 @@ control ComputeChecksumImpl(inout parsed_headers_t hdr,
                 hdr.ndp.target_mac_addr
             },
             hdr.icmpv6.checksum,
+            HashAlgorithm.csum16
+        );
+
+        update_checksum(hdr.ipv4.isValid(),
+            {
+                hdr.ipv4.version,
+                hdr.ipv4.ihl,
+                hdr.ipv4.dscp,
+                hdr.ipv4.ecn,
+                hdr.ipv4.total_len,
+                hdr.ipv4.identification,
+                hdr.ipv4.flags,
+                hdr.ipv4.frag_offset,
+                hdr.ipv4.ttl,
+                hdr.ipv4.protocol,
+                //hdr.ipv4.hdr_checksum,
+                hdr.ipv4.src_addr,
+                hdr.ipv4.dst_addr
+            },
+            hdr.ipv4.hdr_checksum,
+            HashAlgorithm.csum16
+        );
+
+        //with or without payoad?
+        update_checksum_with_payload(hdr.icmp.isValid(),
+            {
+                hdr.ipv4.version,
+                hdr.ipv4.ihl,
+                hdr.ipv4.dscp,
+                hdr.ipv4.ecn,
+                hdr.ipv4.total_len,
+                hdr.ipv4.identification,
+                hdr.ipv4.flags,
+                hdr.ipv4.frag_offset,
+                hdr.ipv4.ttl,
+                hdr.ipv4.protocol,
+                hdr.ipv4.hdr_checksum,
+                hdr.ipv4.src_addr,
+                hdr.ipv4.dst_addr,
+
+                hdr.icmp.type,
+                hdr.icmp.icmp_code,
+                //hdr.icmp.checksum,
+                hdr.icmp.identifier,
+                hdr.icmp.sequence_number,
+                hdr.icmp.timestamp  
+            },
+            hdr.icmp.checksum,
             HashAlgorithm.csum16
         );
     }

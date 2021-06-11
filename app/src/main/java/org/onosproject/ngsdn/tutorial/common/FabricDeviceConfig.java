@@ -16,6 +16,8 @@
 
 package org.onosproject.ngsdn.tutorial.common;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 import org.onlab.packet.Ip4Address;
 import org.onlab.packet.Ip6Address;
 import org.onlab.packet.MacAddress;
@@ -32,10 +34,11 @@ public class FabricDeviceConfig extends Config<DeviceId> {
     private static final String MY_SID = "mySid";
     private static final String IS_SPINE = "isSpine";
     private static final String GATEWAY_PORT = "gatewayPort";
+    private static final String LOAD_BALANCER = "loadBalancer";
 
     @Override
     public boolean isValid() {
-        return hasOnlyFields(MY_STATION_MAC, MY_SID, IS_SPINE, GATEWAY_PORT) &&
+        return hasOnlyFields(MY_STATION_MAC, MY_SID, IS_SPINE, GATEWAY_PORT, LOAD_BALANCER) &&
                 myStationMac() != null &&
                 get(MY_SID, null) != null; //avoid Invalid IPv4/IPv6 exception
     }
@@ -90,5 +93,10 @@ public class FabricDeviceConfig extends Config<DeviceId> {
     public int gatewayPort() {
         String gatewayPort = get(GATEWAY_PORT, null);
         return gatewayPort != null ? Integer.valueOf(gatewayPort) : -2;
+    }
+
+    public LoadBalancerConfig loadBalancerConfig() {
+        JsonNode node = object.path(LOAD_BALANCER);
+        return new LoadBalancerConfig(node);
     }
 }

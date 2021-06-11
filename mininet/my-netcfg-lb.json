@@ -13,7 +13,15 @@
 			"myStationMac": "00:aa:00:00:00:01",
 			"mySid": "10.0.0.1",
 			"isSpine": false,
-			"gatewayPort": -1
+			"gatewayPort": -1,
+			"loadBalancer": {
+				"myVirtualMac": "00:aa:00:00:00:01",
+				"myVirtualIp": "10.0.0.1",
+				"servers": [
+					"00:00:00:00:10:10/10.0.10.1",
+					"00:00:00:00:20:10/10.0.20.1"
+				]
+			}
 		  }
 	  }
 	},

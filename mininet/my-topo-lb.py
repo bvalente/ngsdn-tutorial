@@ -47,7 +47,7 @@ class IPv4Host(Host):
         self.cmd('ip -4 addr add %s dev %s' % (ip, self.defaultIntf()))
         self.cmd('ip -4 route add default via %s' % gw)
 
-        self.cmd('sysctl net.ipv4.ip_forward=1' )
+        # self.cmd('sysctl net.ipv4.ip_forward=1' )
 
         threading.Thread(target=scheduleArpReply, args=(self, self.defaultIntf(), ip.split('/')[0],)).start() #make non-blocking
 
