@@ -62,6 +62,13 @@ class IPv4Host(Host):
 
         self.defaultIntf().updateIP = updateIP
 
+class IPv4Server(IPv4Host):
+
+    def config(self, mac=None, ip=None, defaultRoute=None, lo='up', gw=None,
+               **_params):
+        super(IPv4Server, self).config(mac, ip, defaultRoute, lo, **_params)
+
+        self.cmd('python /mininet/server.py %s &' % self.name)
 
 class TutorialTopo(Topo):
     """Simple topo please
@@ -82,9 +89,9 @@ class TutorialTopo(Topo):
         self.addLink(h1, lb)  # port 1
 
         # IPv4 hosts attached to leaf 2
-        server1 = self.addHost('server1', cls=IPv4Host, mac="00:00:00:00:10:10",
+        server1 = self.addHost('server1', cls=IPv4Server, mac="00:00:00:00:10:10",
                           ip='10.0.10.1/16')
-        server2 = self.addHost('server2', cls=IPv4Host, mac="00:00:00:00:20:10",
+        server2 = self.addHost('server2', cls=IPv4Server, mac="00:00:00:00:20:10",
                           ip='10.0.20.1/16')
         self.addLink(server1, lb)  # port 2
         self.addLink(server2, lb)  # port 3
