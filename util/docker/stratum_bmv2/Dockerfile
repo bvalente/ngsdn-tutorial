@@ -40,7 +40,9 @@ FROM opennetworking/mn-stratum:latest@$MN_STRATUM_SHA as runtime
 
 ENV RUNTIME_DEPS \
     make \
-    iptables
+    iptables \
+    apache2-utils \
+    curl
 RUN install_packages $RUNTIME_DEPS
 
 COPY --from=builder /output /
