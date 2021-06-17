@@ -215,6 +215,7 @@ struct parsed_headers_t {
 struct local_metadata_t {
     l4_port_t   l4_src_port;
     l4_port_t   l4_dst_port;
+    bit<16>     tcpLength;
     bool        is_multicast;
     ipv6_addr_t next_srv6_sid;
     bit<8>      ip_proto;
@@ -224,6 +225,10 @@ struct local_metadata_t {
 }
 
 register<bit<4>>(1) next_server_register;
+
+register<bit<1>>(8192) has_tcp_flow;
+
+register<bit<4>>(8192) tcp_flows; //for each flow, save the corresponding lb server
 
 
 //------------------------------------------------------------------------------
@@ -260,6 +265,7 @@ parser ParserImpl (packet_in packet,
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
         local_metadata.ip_proto = hdr.ipv4.protocol;
+        local_metadata.tcpLength = hdr.ipv4.total_len - 16w20;
         transition select(hdr.ipv4.protocol) {
             IP_PROTO_TCP: parse_tcp;
             IP_PROTO_UDP: parse_udp;
@@ -750,12 +756,58 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 
             if ( my_virtual_ip_table.apply().hit ) {
 
-                //dest is server. change dst mac and ip
-                next_server_register.read(local_metadata.next_server, (bit<32>)0);
+                //check if tcp hash has flow, if not then apply one
+                if (hdr.tcp.isValid()){
 
-                load_balancer_table.apply(); //reads meta.next_server
+                    bit<26> tcp_hash;
+                    bit<1> has_flow;
+                    bit<4> flow;
 
-                next_server_register.write((bit<32>)0, local_metadata.next_server + (bit<4>)1); //overflow
+                    //hash
+                    hash(tcp_hash, HashAlgorithm.crc16, (bit<13>)0, 
+                        { hdr.ipv4.src_addr, hdr.ipv4.dst_addr, hdr.ipv4.protocol, hdr.tcp.src_port, hdr.tcp.dst_port },
+                        (bit<26>)8192 );                    
+
+                    //check if hash already has flow
+                    has_tcp_flow.read(has_flow, (bit<32>)tcp_hash);
+                    if ( has_flow ==  1 ){
+                        //read flow
+                        tcp_flows.read(flow, (bit<32>)tcp_hash);
+                        local_metadata.next_server = flow;
+
+                    } else {
+                        //generate flow and save
+
+                        //read next server
+                        next_server_register.read(flow, (bit<32>)0);
+                        local_metadata.next_server = flow;
+
+                        //save flow
+                        has_tcp_flow.write((bit<32>)tcp_hash, (bit<1>)1);
+                        tcp_flows.write((bit<32>)tcp_hash, flow);
+
+                        //update next server
+                        next_server_register.write((bit<32>)0, flow + (bit<4>)1);
+                    }
+
+                    //load_balancer_table.apply();
+
+                    //TODO check end of tcp connection
+                    //TODO adapt to UDP
+
+                }else{
+
+                    //dest is server. change dst mac and ip
+                    next_server_register.read(local_metadata.next_server, (bit<32>)0);
+
+                    //load_balancer_table.apply(); //reads meta.next_server
+
+                    next_server_register.write((bit<32>)0, local_metadata.next_server + (bit<4>)1); //overflow
+                }
+
+                //fix compilation error
+                load_balancer_table.apply();
+
 
             } else {
                 //response from server
@@ -889,9 +941,46 @@ control ComputeChecksumImpl(inout parsed_headers_t hdr,
             hdr.icmp.checksum,
             HashAlgorithm.csum16
         );
+
+        update_checksum_with_payload(hdr.udp.isValid(),
+            {
+                hdr.ipv4.src_addr,
+                hdr.ipv4.dst_addr,
+                8w0,
+                hdr.ipv4.protocol,
+                hdr.udp.len,
+                hdr.udp.src_port,
+                hdr.udp.dst_port,
+                hdr.udp.len
+            },
+            hdr.udp.checksum,
+            HashAlgorithm.csum16
+        );
+
+        update_checksum_with_payload(hdr.tcp.isValid(),
+            {
+                hdr.ipv4.src_addr,
+                hdr.ipv4.dst_addr,
+                8w0,
+                hdr.ipv4.protocol,
+                //hdr.ipv4.total_len - 16w20,
+                local_metadata.tcpLength,
+                hdr.tcp.src_port,
+                hdr.tcp.dst_port,
+                hdr.tcp.seq_no,
+                hdr.tcp.ack_no,
+                hdr.tcp.data_offset,
+                hdr.tcp.res,
+                hdr.tcp.ecn,
+                hdr.tcp.ctrl,
+                hdr.tcp.window,
+                hdr.tcp.urgent_ptr
+            },
+            hdr.tcp.checksum,
+            HashAlgorithm.csum16
+        );
     }
 }
-
 
 control DeparserImpl(packet_out packet, in parsed_headers_t hdr) {
     apply {
