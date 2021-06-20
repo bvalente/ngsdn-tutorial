@@ -10,7 +10,7 @@ PORT = 80
 def cpuLoad( load):
     for i in range(0, load):
         x = random.random()
-        x * x
+        x * x ** x
 
 class GetHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
@@ -21,8 +21,7 @@ class GetHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
         SimpleHTTPServer.SimpleHTTPRequestHandler.do_GET(self)
 
-        if (len(sys.argv) == 2 and sys.argv[1] == 'server2'):
-            threading.Thread(target=cpuLoad, args=(self, 1000)).start()
+        cpuLoad(1000)
             
 
 logging.basicConfig(level=logging.INFO)
