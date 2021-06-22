@@ -42,7 +42,8 @@ ENV RUNTIME_DEPS \
     make \
     iptables \
     apache2-utils \
-    curl
+    curl \
+    python-requests
 RUN install_packages $RUNTIME_DEPS
 
 COPY --from=builder /output /

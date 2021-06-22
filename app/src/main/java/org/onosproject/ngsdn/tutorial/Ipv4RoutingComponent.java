@@ -415,7 +415,7 @@ public class Ipv4RoutingComponent {
                 log.info("{} event! host={}, deviceId={}, port={}",
                         event.type(), host.id(), deviceId, host.location().port());
                 
-                setUpHostRules(deviceId, host);
+                // setUpHostRules(deviceId, host);
 
                 //my code!
                 blackMagic(host);
@@ -463,7 +463,7 @@ public class Ipv4RoutingComponent {
                 mainComponent.getExecutorService().execute(() -> {
                     log.info("{} event! Configuring {}... linkSrc={}, linkDst={}",
                             event.type(), srcDev, srcDev, dstDev);
-                    setUpFabricRoutes(srcDev);
+                    // setUpFabricRoutes(srcDev);
                     setUpL2NextHopRules(srcDev);
                 });
             }
@@ -471,7 +471,7 @@ public class Ipv4RoutingComponent {
                 mainComponent.getExecutorService().execute(() -> {
                     log.info("{} event! Configuring {}... linkSrc={}, linkDst={}",
                             event.type(), dstDev, srcDev, dstDev);
-                    setUpFabricRoutes(dstDev);
+                    // setUpFabricRoutes(dstDev);
                     setUpL2NextHopRules(dstDev);
                 });
             }
@@ -505,7 +505,7 @@ public class Ipv4RoutingComponent {
             mainComponent.getExecutorService().execute(() -> {
                 DeviceId deviceId = event.subject().id();
                 log.info("{} event! device id={}", event.type(), deviceId);
-                setUpMyStationTable(deviceId);
+                // setUpMyStationTable(deviceId);
                 setUpGateway(deviceId);
             });
         }
@@ -683,23 +683,23 @@ public class Ipv4RoutingComponent {
         final MacAddress hostMac = host.mac();
         int groupId = macToGroupId(hostMac);
 
-        final GroupDescription group = createNextHopGroup(
-                groupId, Collections.singleton(hostMac), deviceId);
+        // final GroupDescription group = createNextHopGroup(
+        //         groupId, Collections.singleton(hostMac), deviceId);
 
         // Map each host IPV6 address to corresponding /128 prefix and obtain a
         // flow rule that points to the group ID. In this tutorial we expect
         // only one flow rule per host.
-        final List<FlowRule> flowRules = hostIpv4Addrs.stream()
-                .map(IpAddress::toIpPrefix)
-                .filter(IpPrefix::isIp4)
-                .map(IpPrefix::getIp4Prefix)
-                .map(prefix -> createRoutingRule(deviceId, prefix, groupId))
-                .collect(Collectors.toList());
+        // final List<FlowRule> flowRules = hostIpv4Addrs.stream()
+        //         .map(IpAddress::toIpPrefix)
+        //         .filter(IpPrefix::isIp4)
+        //         .map(IpPrefix::getIp4Prefix)
+        //         .map(prefix -> createRoutingRule(deviceId, prefix, groupId))
+        //         .collect(Collectors.toList());
 
         // Helper function to install flows after groups, since here flows
         // points to the group and P4Runtime enforces this dependency during
         // write operations.
-        insertInOrder(group, flowRules);
+        // insertInOrder(group, flowRules);
     }
 
     /**
@@ -745,14 +745,14 @@ public class Ipv4RoutingComponent {
             // Create a group with only one member.
             int groupId = macToGroupId(leafMac);
 
-            GroupDescription group = createNextHopGroup(
-                    groupId, Collections.singleton(leafMac), spineId);
+            // GroupDescription group = createNextHopGroup(
+            //         groupId, Collections.singleton(leafMac), spineId);
 
-            List<FlowRule> flowRules = subnetsToRoute.stream()
-                    .map(subnet -> createRoutingRule(spineId, subnet, groupId))
-                    .collect(Collectors.toList());
+            // List<FlowRule> flowRules = subnetsToRoute.stream()
+            //         .map(subnet -> createRoutingRule(spineId, subnet, groupId))
+            //         .collect(Collectors.toList());
 
-            insertInOrder(group, flowRules);
+            // insertInOrder(group, flowRules);
         }
     }
 
@@ -946,12 +946,12 @@ public class Ipv4RoutingComponent {
                 .filter(mastershipService::isLocalMaster)
                 .forEach(deviceId -> {
                     log.info("*** IPV4 ROUTING - Starting initial set up for {}...", deviceId);
-                    setUpMyStationTable(deviceId);
+                    // setUpMyStationTable(deviceId);
                     setUpGateway(deviceId);
-                    setUpFabricRoutes(deviceId);
+                    // setUpFabricRoutes(deviceId);
                     setUpL2NextHopRules(deviceId);
-                    hostService.getConnectedHosts(deviceId)
-                            .forEach(host -> setUpHostRules(deviceId, host));
+                    // hostService.getConnectedHosts(deviceId)
+                    //         .forEach(host -> setUpHostRules(deviceId, host));
                 });
     }
 }
