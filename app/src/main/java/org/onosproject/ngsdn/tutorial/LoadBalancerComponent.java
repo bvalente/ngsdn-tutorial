@@ -477,40 +477,39 @@ public class LoadBalancerComponent {
                     String[] serverLoadArray = serverLoad.split(":");
                     String server = serverLoadArray[0];
                     float load = Float.parseFloat(serverLoadArray[1]);
-    
-                    DeviceId deviceId = context.inPacket().receivedFrom().deviceId();
-                    // LoadBalancerConfig loadBalancerConfig = getLoadBalancerConfig(deviceId);
-                    // List<String> servers = loadBalancerConfig.servers;
-
-                    //remove servers not in onlineServers list
-                    // servers = servers.stream().filter(srv -> onlineServers.contains(srv)).collect(Collectors.toList());
-    
                     serverLoadStorage.put(server, load);
 
-                    for (String srv : onlineServers.keySet()) {
-                        if (!serverLoadStorage.containsKey(srv)){
-                            log.info("serverLoadStorage incomplete");
-                            return; //storage does not contain all servers yet
+                    if(onlineServers.size() == 0){
+                        log.info("No servers online");
+                        return;
+                    } else {
+                        for (String srv : onlineServers.keySet()) {
+                            if (!serverLoadStorage.containsKey(srv)){
+                                log.info("serverLoadStorage incomplete");
+                                return; //storage does not contain all servers yet
+                            }
                         }
+                    }
+                    float totalLoad = serverLoadStorage.values().stream().reduce((float)0, Float::sum);
+                    if (totalLoad < 1){
+                        log.info("Not enough load");
+                        serverLoadStorage.clear();
+                        return;
                     }
 
                     List<String> roundRobin = new LinkedList<String>();
-                    float totalLoad = serverLoadStorage.values().stream().reduce((float)0, Float::sum);
                     for (String srv : serverLoadStorage.keySet()){
                         float srvLoad = serverLoadStorage.get(srv);
-                        if (srvLoad < 1){
-                            log.info("Not enough load");
-                            serverLoadStorage.clear();
-                            return;
-                        } else {
-                            int weigth = (int) Math.ceil( (1.0 - (srvLoad / totalLoad)) * 16.0);
-                            for (int j = 0; j < weigth; j++){
-                                roundRobin.add(onlineServers.get(srv));
-                            }
-                            log.info("Added {} flows to {}", weigth, srv);
+
+                        int weigth = serverLoadStorage.size() == 1 ? 16 :
+                            (int) Math.ceil( (1.0 - (srvLoad / totalLoad)) * 16.0);
+                        for (int j = 0; j < weigth; j++){
+                            roundRobin.add(onlineServers.get(srv));
                         }
+                        log.info("Added {} flows to {}", weigth, srv);
                     }
 
+                    DeviceId deviceId = context.inPacket().receivedFrom().deviceId();
                     String tableId = "IngressPipeImpl.load_balancer_table";
                     int k = 0;
                     for (String srvConfig : roundRobin) {
