@@ -17,7 +17,10 @@ def sendCpuLoad ():
         cpu = subprocess.check_output(cmd, shell=True)
         message = sys.argv[1] + ":" + str(cpu).split('\n')[0]
         byte_message = message.encode("utf-8")
-        opened_socket.sendto(byte_message, (CONTROLLER_IP, 5005))
+        try:
+            opened_socket.sendto(byte_message, (CONTROLLER_IP, 5005))
+        except:
+            pass
         # print('message sent: %s' % message)
 
 def cpuLoad( load):
