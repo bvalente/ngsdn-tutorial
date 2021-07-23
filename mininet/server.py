@@ -1,6 +1,6 @@
 #!/usr/bin/env python2
 
-import os, sys, subprocess, socket, time, threading, random
+import os, sys, subprocess, socket, time, threading, random, json
 import SimpleHTTPServer
 import SocketServer
 import logging
@@ -33,11 +33,23 @@ class GetHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    def _set_headers(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+
+    def do_HEAD(self):
+        self._set_headers()
+
     def do_GET(self):
 
-        SimpleHTTPServer.SimpleHTTPRequestHandler.do_GET(self)
+        # SimpleHTTPServer.SimpleHTTPRequestHandler.do_GET(self)
+        self._set_headers()
+        self.wfile.write(json.dumps({'hello': 'world', 'received': 'ok', 'server': sys.argv[1]}))
 
-        cpuLoad(1000)
+        if (sys.argv[1] == "server2"):
+            cpuLoad(1000)
+
 
 # print('INIT')
 
