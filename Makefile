@@ -81,6 +81,10 @@ onos-log:
 onos-ui:
 	open ${onos_url}/ui
 
+mn-bash:
+	$(info *** Attaching to Mininet bash...)
+	-@docker exec -it mininet bash
+
 mn-cli:
 	$(info *** Attaching to Mininet CLI...)
 	$(info *** To detach press Ctrl-D (Mininet will keep running))

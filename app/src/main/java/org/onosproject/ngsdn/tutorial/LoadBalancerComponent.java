@@ -457,6 +457,11 @@ public class LoadBalancerComponent {
 
     class InternalPacketProcessor implements PacketProcessor {
 
+        public void processTimer(String[] serverArray){
+
+            //TODO basically the same as the cpu load distribution algorithm, but with the average time between cpu loads
+        }
+
         @Override
         public void process (PacketContext context){
             // log.info("Packet received!");
@@ -476,7 +481,15 @@ public class LoadBalancerComponent {
     
                     String[] serverLoadArray = serverLoad.split(":");
                     String server = serverLoadArray[0];
-                    float load = Float.parseFloat(serverLoadArray[1]);
+
+                    //TODO refactor to implement timer in parallel with cpu load, pass as server parameter
+                    if (serverLoadArray[1].equals("timer")){
+                        processTimer(serverLoadArray);
+                        return;
+                    }
+
+                    //else serverLoadArray[1] equals cpu
+                    float load = Float.parseFloat(serverLoadArray[2]);
                     serverLoadStorage.put(server, load);
 
                     if(onlineServers.size() == 0){
@@ -521,6 +534,8 @@ public class LoadBalancerComponent {
                                 PiMatchFieldId.of("local_metadata.next_server"), 
                                 k++ )
                             .build();
+                        
+                        // TODO change implementation to use 'range' key in P4
                         
                             List<PiActionParam> params = new LinkedList<PiActionParam>();
                             params.add(new PiActionParam(

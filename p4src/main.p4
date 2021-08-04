@@ -503,33 +503,6 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         counters = direct_counter(CounterType.packets_and_bytes);
     }
 
-    action_selector(HashAlgorithm.crc16, 32w1024, 32w16) ecmp_selector_v4;
-
-    // routing_v4_table
-    action set_next_hop_v4(mac_addr_t dmac) {
-        hdr.ethernet.src_addr = hdr.ethernet.dst_addr;
-        hdr.ethernet.dst_addr = dmac;
-        hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
-    }
-
-    table routing_v4_table {
-        key = {
-            hdr.ipv4.dst_addr: lpm;
-            hdr.ipv4.dst_addr: selector;
-            hdr.ipv4.src_addr: selector;
-            //hdr.ipv4.flow_label: selector;
-            //hdr.ipv4.next_hdr: selector;
-            local_metadata.l4_src_port: selector;
-            local_metadata.l4_dst_port: selector;
-        }
-        actions = {
-            set_next_hop_v4;
-        }
-        implementation = ecmp_selector_v4;
-        @name("routing_v4_table_counter")
-        counters = direct_counter(CounterType.packets_and_bytes);
-    }
-
     //load balancing
 
     table my_virtual_ip_table {
@@ -615,8 +588,6 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         standard_metadata.egress_spec = standard_metadata.ingress_port;
     }
 
-    action_selector(HashAlgorithm.crc16, 32w1024, 32w16) ecmp_selector;
-
     // ndp_reply_table
     table ndp_reply_table {
         key = {
@@ -628,48 +599,6 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         @name("ndp_reply_table_counter")
         counters = direct_counter(CounterType.packets_and_bytes);
     }
-
-    // my_station_table
-    table my_station_table {
-        key = {
-            hdr.ethernet.dst_addr: exact;
-        }
-        actions = {
-            NoAction;
-        }
-        @name("my_station_table_counter")
-        counters = direct_counter(CounterType.packets_and_bytes);
-    }
-
-    // routing_v6_table
-    action set_next_hop(mac_addr_t dmac) {
-        hdr.ethernet.src_addr = hdr.ethernet.dst_addr;
-        hdr.ethernet.dst_addr = dmac;
-        hdr.ipv6.hop_limit = hdr.ipv6.hop_limit - 1;
-    }
-    table routing_v6_table {
-        key = {
-            hdr.ipv6.dst_addr: lpm;
-            hdr.ipv6.dst_addr: selector;
-            hdr.ipv6.src_addr: selector;
-            hdr.ipv6.flow_label: selector;
-            hdr.ipv6.next_hdr: selector;
-            local_metadata.l4_src_port: selector;
-            local_metadata.l4_dst_port: selector;
-        }
-        actions = {
-            set_next_hop;
-        }
-        implementation = ecmp_selector;
-        @name("routing_v6_table_counter")
-        counters = direct_counter(CounterType.packets_and_bytes);
-    }
-
-
-
-    // *** TODO EXERCISE 6 (SRV6)
-    //
-    // Implement tables to provide SRV6 logic.
 
 
     // *** ACL
