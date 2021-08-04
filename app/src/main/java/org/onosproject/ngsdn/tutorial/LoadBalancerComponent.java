@@ -189,46 +189,56 @@ public class LoadBalancerComponent {
     private void setupLoadBalancer(DeviceId deviceId){
 
         log.info("Adding Load Balancing Configurations to {} ...", deviceId);
+        LoadBalancerConfig loadBalancerConfig = getLoadBalancerConfig(deviceId);
 
-        final LoadBalancerConfig loadBalancerConfig = getLoadBalancerConfig(deviceId);
-
+        //----
         //set special acl for load balancing controller packets
-
-        final PiCriterion controllerCriterion = PiCriterion.builder()
+        PiCriterion controllerCriterion = PiCriterion.builder()
             .matchTernary(
                 PiMatchFieldId.of("hdr.ethernet.dst_addr"),
                 MacAddress.valueOf("00:aa:00:00:00:ff").toBytes(),
                 MacAddress.valueOf("00:aa:00:00:00:ff").toBytes())
             .build();
-
-        final PiAction cloneToCpuAction = PiAction.builder()
+        PiAction cloneToCpuAction = PiAction.builder()
             .withId(PiActionId.of("IngressPipeImpl.clone_to_cpu"))
             .build();
-        
-        flowRuleService.applyFlowRules(Utils.buildFlowRule(
-            deviceId, appId, "IngressPipeImpl.acl_table", controllerCriterion, cloneToCpuAction));
+        FlowRule aclRule = Utils.buildFlowRule(
+            deviceId, appId, "IngressPipeImpl.acl_table", controllerCriterion, cloneToCpuAction);
 
-        //set tables
-        //my_virtual_ip_table
-
-        String tableId = "IngressPipeImpl.my_virtual_ip_table";
-
-        PiCriterion match = PiCriterion.builder()
-                .matchExact(
-                        PiMatchFieldId.of("hdr.ipv4.dst_addr"),
-                        loadBalancerConfig.myVirtualIp.toOctets())
-                .build();
-
-        PiTableAction action = PiAction.builder()
-                .withId(PiActionId.of("NoAction"))
-                .build();
-
+        //set Virtual Ip rule (10.0.0.1) - packet goes through load balancing if it has this IP
+        PiCriterion myVirtualIpCriterion = PiCriterion.builder()
+            .matchExact(
+                PiMatchFieldId.of("hdr.ipv4.dst_addr"),
+                loadBalancerConfig.myVirtualIp.toOctets())
+            .build();
+        PiTableAction noAction = PiAction.builder()
+            .withId(PiActionId.of("NoAction"))
+            .build();
         FlowRule myStationRule = Utils.buildFlowRule(
-                deviceId, appId, tableId, match, action);
+            deviceId, appId, "IngressPipeImpl.my_virtual_ip_table", myVirtualIpCriterion, noAction);
 
-        flowRuleService.applyFlowRules(myStationRule);
+        //ARP entry for Virtual Ip
+        PiCriterion arpCriterion = PiCriterion.builder()
+            .matchExact(
+                PiMatchFieldId.of("hdr.arp.protoDstAddr"), 
+                loadBalancerConfig.myVirtualIp.toOctets())
+            .build();
+        PiActionParam arpActionParam = new PiActionParam(
+            PiActionParamId.of("target_mac"), 
+            loadBalancerConfig.myVirtualMac.toBytes());
+        PiAction arpAction = PiAction.builder()
+            .withId(PiActionId.of("IngressPipeImpl.arp_request_to_reply"))
+            .withParameter(arpActionParam)
+            .build();
+        FlowRule arpRule = Utils.buildFlowRule(
+            deviceId, appId, "IngressPipeImpl.arp_reply_table", arpCriterion, arpAction);
 
-        //divide round robin
+        //install all basic flow rules
+        flowRuleService.applyFlowRules(aclRule, myStationRule, arpRule);
+
+        //----
+        //initial load balancing configuration for all online servers
+
         int count = (int) Math.ceil( 16 / loadBalancerConfig.servers.size() );
         int key = 0;
         for (String serverString : loadBalancerConfig.servers) {
@@ -290,36 +300,11 @@ public class LoadBalancerComponent {
                     deviceId, appId, tableId3, match3, action3);
     
             flowRuleService.applyFlowRules(myStationRule3);
-
-            
         }
-
-        //update virtual IP MAC table
-        final String tableId4 = "IngressPipeImpl.arp_reply_table";
-        final PiCriterion match4 = PiCriterion.builder()
-            .matchExact(
-                PiMatchFieldId.of("hdr.arp.protoDstAddr"), 
-                loadBalancerConfig.myVirtualIp.toOctets())
-            .build();
-        final PiActionParam targetMacParam4 = new PiActionParam(
-            PiActionParamId.of("target_mac"), 
-            loadBalancerConfig.myVirtualMac.toBytes());
-        final PiAction action4 = PiAction.builder()
-            .withId(PiActionId.of("IngressPipeImpl.arp_request_to_reply"))
-            .withParameter(targetMacParam4)
-            .build();
-
-        // Build flow rule.
-        final FlowRule rule4 = Utils.buildFlowRule(
-        deviceId, appId, tableId4, match4, action4);
-
-        flowRuleService.applyFlowRules(rule4);
-
     }
 
     //pre-load onlineServers with serverConfig string
     private void serverOnline(Host host){
-
         String hostName = host.annotations().value("name");
         DeviceId deviceId = host.location().deviceId();
         LoadBalancerConfig loadBalancerConfig = getLoadBalancerConfig(deviceId);
@@ -328,14 +313,27 @@ public class LoadBalancerComponent {
             .findFirst().get();
         onlineServers.put(hostName, serverConfig);
         log.info("Server online: {}", host);
-
     }
 
+    //remove offline servers
     private void serverOffline(Host host){
         onlineServers.remove(host.annotations().value("name"));
         log.info("Server offline: {}", host);
     }
 
+    //Install flow rules for servers
+    class ServerLoad {
+        public String server;
+        public int load;
+        public ServerLoad (String server, int load){
+            this.server = server;
+            this.load = load;
+        }
+    }
+
+    public void InstallServerFlows(ServerLoad ... serverLoadArray){
+
+    }
 
     //--------------------------------------------------------------------------
     // EVENT LISTENERS
@@ -372,33 +370,17 @@ public class LoadBalancerComponent {
 
         @Override
         public void event(HostEvent event) {
-
             String hostName = event.subject().annotations().value("name");
             if (hostName.contains("server")){
-
                 if (event.type() == Type.HOST_ADDED){
                     serverOnline(event.subject());
                 } else if (event.type() == Type.HOST_REMOVED){
                     serverOffline(event.subject());
                 }
-
             }
         }
     }
 
-    /**
-     * Listener of link events, which triggers configuration of routing rules to
-     * forward packets across the fabric, i.e. from leaves to spines and vice
-     * versa.
-     * <p>
-     * Reacting to link events instead of device ones, allows us to make sure
-     * all device are always configured with a topology view that includes all
-     * links, e.g. modifying an ECMP group as soon as a new link is added. The
-     * downside is that we might be configuring the same device twice for the
-     * same set of links/paths. However, the ONOS core treats these cases as a
-     * no-op when the device is already configured with the desired forwarding
-     * state (i.e. flows and groups)
-     */
     class InternalLinkListener implements LinkListener {
 
         @Override
@@ -457,10 +439,85 @@ public class LoadBalancerComponent {
 
     class InternalPacketProcessor implements PacketProcessor {
 
-        public void processTimer(String[] serverArray){
+        //cpu load algorithm
+        public void processLoad(DeviceId deviceId, String[] serverLoadArray) {
+            float load = Float.parseFloat(serverLoadArray[2]);
+            serverLoadStorage.put(serverLoadArray[0], load);
+
+            if(onlineServers.size() == 0){
+                log.info("No servers online");
+                return;
+            } else {
+                for (String srv : onlineServers.keySet()) {
+                    if (!serverLoadStorage.containsKey(srv)){
+                        log.info("serverLoadStorage incomplete");
+                        return; //storage does not contain all servers yet
+                    }
+                }
+            }
+            float totalLoad = serverLoadStorage.values().stream().reduce((float)0, Float::sum);
+            if (totalLoad < 1){
+                log.info("Not enough load");
+                serverLoadStorage.clear();
+                return;
+            }
+
+            List<String> roundRobin = new LinkedList<String>();
+            for (String srv : serverLoadStorage.keySet()){
+                float srvLoad = serverLoadStorage.get(srv);
+
+                int weigth = serverLoadStorage.size() == 1 ? 16 :
+                    (int) Math.ceil( (1.0 - (srvLoad / totalLoad)) * 16.0);
+                for (int j = 0; j < weigth; j++){
+                    roundRobin.add(onlineServers.get(srv));
+                }
+                log.info("Added {} flows to {}", weigth, srv);
+            }
+
+            // DeviceId deviceId = context.inPacket().receivedFrom().deviceId();
+            String tableId = "IngressPipeImpl.load_balancer_table";
+            int k = 0;
+            for (String srvConfig : roundRobin) {
+
+                if (k >= 16) break;
+                
+                PiCriterion piCriterion = PiCriterion.builder()
+                    .matchExact(
+                        PiMatchFieldId.of("local_metadata.next_server"), 
+                        k++ )
+                    .build();
+                
+                // TODO change implementation to use 'range' key in P4
+                
+                List<PiActionParam> params = new LinkedList<PiActionParam>();
+                params.add(new PiActionParam(
+                    PiActionParamId.of("mac"), 
+                    MacAddress.valueOf(srvConfig.split("/")[0]).toBytes()));
+                params.add(new PiActionParam(
+                    PiActionParamId.of("ip"),
+                    Ip4Address.valueOf(srvConfig.split("/")[1]).toOctets()));
+                PiTableAction piAction = PiAction.builder()
+                    .withId(PiActionId.of("IngressPipeImpl.set_next_server"))
+                    .withParameters(params)
+                    .build();
+                
+                FlowRule flowRule = Utils.buildFlowRule(
+                    deviceId, appId, tableId, piCriterion, piAction);
+                
+                flowRuleService.applyFlowRules(flowRule);
+            }
+            
+            //delete storage
+            serverLoadStorage.clear();
+
+        }
+
+        //reponse time algorithm
+        public void processTimer(DeviceId deviceId, String[] serverArray){
 
             //TODO basically the same as the cpu load distribution algorithm, but with the average time between cpu loads
         }
+
 
         @Override
         public void process (PacketContext context){
@@ -479,84 +536,18 @@ public class LoadBalancerComponent {
                     String serverLoad = new String(body, StandardCharsets.UTF_8);
                     log.info("Server Load Packet: {}", serverLoad);
     
+                    DeviceId deviceId = context.inPacket().receivedFrom().deviceId();
                     String[] serverLoadArray = serverLoad.split(":");
-                    String server = serverLoadArray[0];
 
-                    //TODO refactor to implement timer in parallel with cpu load, pass as server parameter
                     if (serverLoadArray[1].equals("timer")){
-                        processTimer(serverLoadArray);
+                        processTimer(deviceId, serverLoadArray);
                         return;
-                    }
-
-                    //else serverLoadArray[1] equals cpu
-                    float load = Float.parseFloat(serverLoadArray[2]);
-                    serverLoadStorage.put(server, load);
-
-                    if(onlineServers.size() == 0){
-                        log.info("No servers online");
+                    } else if (serverLoadArray[1].equals("cpu")){
+                        processLoad(deviceId, serverLoadArray);
                         return;
                     } else {
-                        for (String srv : onlineServers.keySet()) {
-                            if (!serverLoadStorage.containsKey(srv)){
-                                log.info("serverLoadStorage incomplete");
-                                return; //storage does not contain all servers yet
-                            }
-                        }
+                        log.info("Invalid command: {}", serverLoad);
                     }
-                    float totalLoad = serverLoadStorage.values().stream().reduce((float)0, Float::sum);
-                    if (totalLoad < 1){
-                        log.info("Not enough load");
-                        serverLoadStorage.clear();
-                        return;
-                    }
-
-                    List<String> roundRobin = new LinkedList<String>();
-                    for (String srv : serverLoadStorage.keySet()){
-                        float srvLoad = serverLoadStorage.get(srv);
-
-                        int weigth = serverLoadStorage.size() == 1 ? 16 :
-                            (int) Math.ceil( (1.0 - (srvLoad / totalLoad)) * 16.0);
-                        for (int j = 0; j < weigth; j++){
-                            roundRobin.add(onlineServers.get(srv));
-                        }
-                        log.info("Added {} flows to {}", weigth, srv);
-                    }
-
-                    DeviceId deviceId = context.inPacket().receivedFrom().deviceId();
-                    String tableId = "IngressPipeImpl.load_balancer_table";
-                    int k = 0;
-                    for (String srvConfig : roundRobin) {
-
-                        if (k >= 16) break;
-                        
-                        PiCriterion piCriterion = PiCriterion.builder()
-                            .matchExact(
-                                PiMatchFieldId.of("local_metadata.next_server"), 
-                                k++ )
-                            .build();
-                        
-                        // TODO change implementation to use 'range' key in P4
-                        
-                            List<PiActionParam> params = new LinkedList<PiActionParam>();
-                            params.add(new PiActionParam(
-                                PiActionParamId.of("mac"), 
-                                MacAddress.valueOf(srvConfig.split("/")[0]).toBytes()));
-                            params.add(new PiActionParam(
-                                PiActionParamId.of("ip"),
-                                Ip4Address.valueOf(srvConfig.split("/")[1]).toOctets()));
-                            PiTableAction piAction = PiAction.builder()
-                                .withId(PiActionId.of("IngressPipeImpl.set_next_server"))
-                                .withParameters(params)
-                                .build();
-                            
-                            FlowRule flowRule = Utils.buildFlowRule(
-                                deviceId, appId, tableId, piCriterion, piAction);
-                            
-                            flowRuleService.applyFlowRules(flowRule);
-                    }
-                    
-                    //delete storage
-                    serverLoadStorage.clear();
 
                 }
             }
@@ -567,8 +558,6 @@ public class LoadBalancerComponent {
     //--------------------------------------------------------------------------
     // UTILITY METHODS
     //--------------------------------------------------------------------------
-
-
 
     /**
      * Returns the FabricDeviceConfig config object for the given device.
@@ -582,6 +571,12 @@ public class LoadBalancerComponent {
         return Optional.ofNullable(config);
     }
 
+    /**
+     * Returns the Load Balancer Config object
+     * 
+     * @param deviceId the device ID
+     * @return LoadBalancerConfig load balancer config
+     */
     private LoadBalancerConfig getLoadBalancerConfig(DeviceId deviceId) {
         return getDeviceConfig(deviceId)
                 .map(FabricDeviceConfig::loadBalancerConfig)
