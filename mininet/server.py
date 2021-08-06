@@ -8,8 +8,10 @@ import logging
 CONTROLLER_IP = "10.0.0.254"
 CONTROLLER_MAC = "00:aa:00:00:00:ff"
 PORT = 80
+CPU=False
+LATENCY=True
 
-timerListGlobal = []
+latencyListGlobal = []
 
 def sendCpuLoadLoop(args, alive, opened_socket):
     while alive[0]:
@@ -36,10 +38,11 @@ def cpuLoad(load):
 
 #TODO should also send max value?
 # receive list with time taken to process each GET and calculate the average
-def sendTimerList(serverName, timerList):
-    logging.debug("Sending timer to controller")
+def sendLatencyList(serverName, latencyList):
+    logging.debug("Sending latency to controller")
     opened_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    message = serverName + ":timer:" + str(sum(timerList) / len(timerList))
+    #format: serverX:latency:<avg latency>:<sum latency>
+    message = serverName + ":latency:" + str(sum(latencyList) / len(latencyList)) + ":" + str(sum(latencyList))
     byte_message = message.encode("utf-8")
     try:
         opened_socket.sendto(byte_message, (CONTROLLER_IP, 5005))
@@ -47,6 +50,26 @@ def sendTimerList(serverName, timerList):
         pass
     finally:
         opened_socket.close()
+
+def sendLatencyLoop(args, alive, mySocket):
+    global latencyListGlobal
+    while alive[0]:
+        time.sleep(3)
+        if (len(latencyListGlobal) > 0):
+            #format: serverName:latency:<avg latency>:<sum latency>
+            message = args.serverName + ":latency:" + str(sum(latencyListGlobal) / len(latencyListGlobal)) + ":" + str(sum(latencyListGlobal)) + ":" + str(max(latencyListGlobal))
+            byte_message = message.encode("utf-8")
+            try:
+                mySocket.sendto(byte_message, (CONTROLLER_IP, 5005))
+                latencyListGlobal = [] #reset list
+            except:
+                pass
+
+def sendLatency(args, alive):
+    mySocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    thread = threading.Thread(target=sendLatencyLoop, args=(args, alive, mySocket))
+    thread.start()
+    return (mySocket, thread)
 
 def MakeGetHandler(args):
     
@@ -72,13 +95,14 @@ def MakeGetHandler(args):
             end = time.time() - start
             logging.debug("Request took %s sec" % end)
 
-            global timerListGlobal
-            timerListGlobal += [end]
-            logging.debug("Timer List: %s" % ', '.join(map(str, timerListGlobal)) )
+            if(LATENCY):
+                global latencyListGlobal
+                latencyListGlobal += [end]
+                logging.debug("Latency List: %s" % ', '.join(map(str, latencyListGlobal)) )
 
-            if (len(timerListGlobal) >= 10):
-                sendTimerList(self.serverName, timerListGlobal)
-                timerListGlobal = []
+                if (len(latencyListGlobal) >= 10 and False): #disable send list here
+                    sendlatencyList(self.serverName, latencyListGlobal)
+                    latencyListGlobal = []
 
         def do_HEAD(self):
             self._set_headers()
@@ -87,8 +111,14 @@ def MakeGetHandler(args):
             self._set_headers()
             self.wfile.write(json.dumps({'server': self.serverName}))
 
-            if (self.serverName == "server2"):
-                cpuLoad(1000)
+            #artificial load/l  atency
+            if (self.serverName == "server1"):
+                logging.debug("sleeping 0.07")
+                time.sleep(0.07)
+            elif (self.serverName == "server2"):
+                # cpuLoad(1000)
+                logging.debug("sleeping 0.1")
+                time.sleep(0.1) # alternative for artificial latency
     
     return GetHandler
 
@@ -112,17 +142,29 @@ def main():
     os.system('arp -s %s %s' % (CONTROLLER_IP, CONTROLLER_MAC))
 
     #thread to send cpu load
-    cpuLoadAlive = [True] #pass variable as reference
-    (cpuLoadSocket, cpuLoadThread) = sendCpuLoad(args, cpuLoadAlive)
+    if (CPU):
+        cpuLoadAlive = [True] #pass variable by reference
+        (cpuLoadSocket, cpuLoadThread) = sendCpuLoad(args, cpuLoadAlive)
+    
+    if(LATENCY):
+        latencyAlive = [True] #pass variable by reference
+        (latencySocket, latencyThread) = sendLatency(args, latencyAlive)
 
     #SIGINT
     def signal_handler(sig, frame):
         logging.info("Signal handler, shutdown server")
 
-        logging.debug("Closing cpuLoad socket")
-        cpuLoadAlive[0] = False
-        cpuLoadThread.join()
-        cpuLoadSocket.close()
+        if (CPU):
+            logging.debug("Closing cpuLoad socket")
+            cpuLoadAlive[0] = False
+            cpuLoadThread.join()
+            cpuLoadSocket.close()
+        
+        if (LATENCY):
+            logging.debug("Closing latency socket")
+            latencyAlive[0] = False
+            latencyThread.join()
+            latencySocket.close()
 
         logging.debug("Shutdown httpd")
         threading.Thread(target=httpd.shutdown).start()

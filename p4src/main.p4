@@ -221,14 +221,18 @@ struct local_metadata_t {
     bit<8>      ip_proto;
     bit<8>      icmp_type;
     bit<16>     arp_op;
-    bit<4>      next_server;
+    bit<6>      next_server;
 }
 
-register<bit<4>>(1) next_server_register;
+register<bit<6>>(1) next_server_register;
 
 register<bit<1>>(8192) has_tcp_flow;
 
-register<bit<4>>(8192) tcp_flows; //for each flow, save the corresponding lb server
+// register<bit<4>>(8192) tcp_flows; //for each flow, save the corresponding lb server
+
+register<mac_addr_t>(8192) tcp_flows_mac;
+
+register<bit<32>>(8192) tcp_flows_ip;
 
 
 //------------------------------------------------------------------------------
@@ -524,7 +528,7 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 
     table load_balancer_table {
         key = {
-            local_metadata.next_server: exact;
+            local_metadata.next_server: range;
         }
         actions = {
             set_next_server;
@@ -685,57 +689,80 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 
             if ( my_virtual_ip_table.apply().hit ) {
 
-                //check if tcp hash has flow, if not then apply one
-                if (hdr.tcp.isValid()){
+                bool skip_lb_table = false;
+                bit<26> tcp_hash = 0; //fake initialize for compiler warning
+                bit<1> has_flow;
 
-                    bit<26> tcp_hash;
-                    bit<1> has_flow;
-                    bit<4> flow;
+                if (hdr.tcp.isValid()){ //tcp packets
+
+                    //check if tcp hash has flow, if not then apply one
 
                     //hash
+                    //{ hdr.ipv4.dst_addr, hdr.ipv4.protocol, hdr.tcp.dst_port } should not be relevant for hashing
                     hash(tcp_hash, HashAlgorithm.crc16, (bit<13>)0, 
-                        { hdr.ipv4.src_addr, hdr.ipv4.dst_addr, hdr.ipv4.protocol, hdr.tcp.src_port, hdr.tcp.dst_port },
-                        (bit<26>)8192 );                    
+                        { hdr.ipv4.src_addr, hdr.tcp.src_port },
+                        (bit<26>)8192 );  
+                                      
 
                     //check if hash already has flow
-                    has_tcp_flow.read(has_flow, (bit<32>)tcp_hash);
+                    has_tcp_flow.read(
+                        has_flow, 
+                        (bit<32>)tcp_hash);
+
                     if ( has_flow ==  1 ){
                         //read flow
-                        tcp_flows.read(flow, (bit<32>)tcp_hash);
-                        local_metadata.next_server = flow;
+                        skip_lb_table = true;
+                        tcp_flows_mac.read(
+                            hdr.ethernet.dst_addr, 
+                            (bit<32>)tcp_hash);
+                        tcp_flows_ip.read(
+                            hdr.ipv4.dst_addr, 
+                            (bit<32>)tcp_hash);
 
                     } else {
-                        //generate flow and save
+                        //set next server and save
 
                         //read next server
-                        next_server_register.read(flow, (bit<32>)0);
-                        local_metadata.next_server = flow;
-
-                        //save flow
-                        has_tcp_flow.write((bit<32>)tcp_hash, (bit<1>)1);
-                        tcp_flows.write((bit<32>)tcp_hash, flow);
-
+                        next_server_register.read(
+                            local_metadata.next_server, 
+                            (bit<32>)0);
                         //update next server
-                        next_server_register.write((bit<32>)0, flow + (bit<4>)1);
-                    }
+                        next_server_register.write(
+                            (bit<32>)0, 
+                            local_metadata.next_server + (bit<6>)1); //will overflow
 
-                    //load_balancer_table.apply();
+                        //lb_table will save next server in register
+                        skip_lb_table = false;
+                    }
 
                     //TODO check end of tcp connection
                     //TODO adapt to UDP
 
-                }else{
+                }else{ //not tcp packets
 
-                    //dest is server. change dst mac and ip
-                    next_server_register.read(local_metadata.next_server, (bit<32>)0);
+                    //read next server
+                    next_server_register.read(
+                        local_metadata.next_server, 
+                        (bit<32>)0);
+                    //update next server
+                    next_server_register.write(
+                        (bit<32>)0, 
+                        local_metadata.next_server + (bit<6>)1); // will overflow
 
-                    //load_balancer_table.apply(); //reads meta.next_server
-
-                    next_server_register.write((bit<32>)0, local_metadata.next_server + (bit<4>)1); //overflow
+                    //hit lb_table!
+                    skip_lb_table = false;
                 }
 
-                //fix compilation error
-                load_balancer_table.apply();
+                //apply lb_table
+                //common code for all previous if else cases
+                if(!skip_lb_table){
+                    if(load_balancer_table.apply().hit && hdr.tcp.isValid()){
+                        //save mac and ip in registers
+                        has_tcp_flow.write((bit<32>)tcp_hash, (bit<1>)1);
+                        tcp_flows_mac.write((bit<32>)tcp_hash, hdr.ethernet.dst_addr);
+                        tcp_flows_ip.write((bit<32>)tcp_hash, hdr.ipv4.dst_addr);
+                    }
+                }
 
 
             } else {
@@ -743,6 +770,8 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
                 //unset mac and ip
 
                 unset_server_table.apply();
+                
+                //TODO check here if FIN flag is 1
             }
 
             //first hit ecmp, then normal table, then ternary

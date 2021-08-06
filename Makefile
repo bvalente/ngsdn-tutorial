@@ -93,6 +93,29 @@ mn-cli:
 mn-log:
 	docker logs -f mininet
 
+_lb-server-start-2:
+	$(info *** Starting 2 LB servers...)
+	docker exec -d mininet /mininet/server-start.sh 2
+
+lb-server-start: _lb-server-start-2
+
+lb-server-shutdown:
+	$(info *** Shutdown LB servers...)
+	docker exec mininet /mininet/server-shutdown.sh
+
+lb-server-kill:
+	$(info *** Shutdown LB servers...)
+	docker exec mininet /mininet/server-kill.sh
+
+lb-server-restart:
+	make lb-server-shutdown
+	sleep 3
+	make lb-server-start
+
+lb-client-test:
+	$(info *** Testing LB client...)
+	docker exec -it mininet m h1 python /mininet/client.py
+
 _netcfg:
 	$(info *** Pushing ${NGSDN_NETCFG_JSON} to ONOS...)
 	${onos_curl} -X POST -H 'Content-Type:application/json' \

@@ -16,22 +16,14 @@
 
 package org.onosproject.ngsdn.tutorial;
 
-import com.google.common.collect.Lists;
-
 import org.onlab.packet.Ip4Address;
-import org.onlab.packet.Ip4Prefix;
-import org.onlab.packet.IpAddress;
-import org.onlab.packet.IpPrefix;
 import org.onlab.packet.MacAddress;
 import org.onlab.util.ItemNotFoundException;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.mastership.MastershipService;
-import org.onosproject.net.ConnectPoint;
 import org.onosproject.net.Device;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.Host;
-import org.onosproject.net.Link;
-import org.onosproject.net.PortNumber;
 import org.onosproject.net.config.NetworkConfigService;
 import org.onosproject.net.device.DeviceEvent;
 import org.onosproject.net.device.DeviceListener;
@@ -39,17 +31,12 @@ import org.onosproject.net.device.DeviceService;
 import org.onosproject.net.flow.FlowRule;
 import org.onosproject.net.flow.FlowRuleService;
 import org.onosproject.net.flow.criteria.PiCriterion;
-import org.onosproject.net.group.GroupDescription;
 import org.onosproject.net.group.GroupService;
 import org.onosproject.net.host.HostEvent;
 import org.onosproject.net.host.HostListener;
 import org.onosproject.net.host.HostService;
-import org.onosproject.net.host.InterfaceIpAddress;
 import org.onosproject.net.host.HostEvent.Type;
-import org.onosproject.net.intf.Interface;
 import org.onosproject.net.intf.InterfaceService;
-import org.onosproject.net.link.LinkEvent;
-import org.onosproject.net.link.LinkListener;
 import org.onosproject.net.link.LinkService;
 import org.onosproject.net.packet.PacketContext;
 import org.onosproject.net.packet.PacketProcessor;
@@ -59,7 +46,6 @@ import org.onosproject.net.pi.model.PiActionParamId;
 import org.onosproject.net.pi.model.PiMatchFieldId;
 import org.onosproject.net.pi.runtime.PiAction;
 import org.onosproject.net.pi.runtime.PiActionParam;
-import org.onosproject.net.pi.runtime.PiActionProfileGroupId;
 import org.onosproject.net.pi.runtime.PiTableAction;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
@@ -71,18 +57,15 @@ import org.onosproject.ngsdn.tutorial.common.Utils;
 import org.onosproject.ngsdn.tutorial.common.LoadBalancerConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Dictionary;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.Map.Entry;
 
 import static com.google.common.collect.Streams.stream;
 import static org.onosproject.ngsdn.tutorial.AppConstants.INITIAL_SETUP_DELAY;
@@ -101,18 +84,31 @@ public class LoadBalancerComponent {
 
     private static final Logger log = LoggerFactory.getLogger(LoadBalancerComponent.class);
 
-    private static final int DEFAULT_ECMP_GROUP_ID = 0xec3b0000;
-    private static final long GROUP_INSERT_DELAY_MILLIS = 200;
-
     private final HostListener hostListener = new InternalHostListener();
-    private final LinkListener linkListener = new InternalLinkListener();
     private final DeviceListener deviceListener = new InternalDeviceListener();
     private final PacketProcessor packetProcessor = new InternalPacketProcessor();
 
     private ApplicationId appId;
 
-    private HashMap<String, Float> serverLoadStorage;
+    private HashMap<String, Float> serverCpuStorage;
+    private HashMap<String, Float> serverLatencyStorage;
+    private HashMap<String, ServerFlows> serverFlowsStorage;
     private HashMap<String, String> onlineServers;
+    
+    //Aux object
+    class ServerFlows {
+        public MacAddress mac;
+        public Ip4Address ip;
+        public String name;
+        public int flows;
+        public ServerFlows (String serverString, int flows){
+            String[] serverSplit = serverString.split("/");
+            this.mac = MacAddress.valueOf(serverSplit[0]);
+            this.ip = Ip4Address.valueOf(serverSplit[1]);
+            this.name = serverSplit[2];
+            this.flows = flows;
+        }
+    }
 
     //--------------------------------------------------------------------------
     // ONOS CORE SERVICE BINDING
@@ -162,11 +158,12 @@ public class LoadBalancerComponent {
     protected void activate() {
         appId = mainComponent.getAppId();
 
-        serverLoadStorage = new HashMap<String, Float>();
+        serverCpuStorage = new HashMap<String, Float>();
+        serverLatencyStorage = new HashMap<String, Float>();
+        serverFlowsStorage = new HashMap<String, ServerFlows>();
         onlineServers = new HashMap<String, String>();
 
         hostService.addListener(hostListener);
-        linkService.addListener(linkListener);
         deviceService.addListener(deviceListener);
         packetService.addProcessor(packetProcessor, 10);
 
@@ -179,7 +176,6 @@ public class LoadBalancerComponent {
     @Deactivate
     protected void deactivate() {
         hostService.removeListener(hostListener);
-        linkService.removeListener(linkListener);
         deviceService.removeListener(deviceListener);
         packetService.removeProcessor(packetProcessor);
 
@@ -238,52 +234,24 @@ public class LoadBalancerComponent {
 
         //----
         //initial load balancing configuration for all online servers
+        int nServers = loadBalancerConfig.servers.size();
+        int nFlows = 64 / nServers;
+        FlowRule[] unsetServerRules = new FlowRule[nServers];
+        int i = 0;
 
-        int count = (int) Math.ceil( 16 / loadBalancerConfig.servers.size() );
-        int key = 0;
         for (String serverString : loadBalancerConfig.servers) {
             
-            log.info("Adding {} entries to Load Balancing for {} ...", count, serverString);
-
-            for ( int i = 0; i < count; i ++){
-                
-                //load_balancer_table
-                String tableId2 = "IngressPipeImpl.load_balancer_table";
-
-                PiCriterion match2 = PiCriterion.builder()
-                        .matchExact(
-                                PiMatchFieldId.of("local_metadata.next_server"),
-                                key++ )
-                        .build();
-
-                List<PiActionParam> params = new LinkedList<PiActionParam>();
-                params.add(new PiActionParam(
-                    PiActionParamId.of("mac"),
-                    MacAddress.valueOf(serverString.split("/")[0]).toBytes()));
-                params.add(new PiActionParam(
-                    PiActionParamId.of("ip"),
-                    Ip4Address.valueOf(serverString.split("/")[1]).toOctets()));
-                PiTableAction action2 = PiAction.builder()
-                        .withId(PiActionId.of("IngressPipeImpl.set_next_server"))
-                        .withParameters(params)
-                        .build();
-        
-                FlowRule myStationRule2 = Utils.buildFlowRule(
-                        deviceId, appId, tableId2, match2, action2);
-        
-                flowRuleService.applyFlowRules(myStationRule2);
-
-            }
-
-            //undo_server_table
-            String tableId3 = "IngressPipeImpl.unset_server_table";
-
-            PiCriterion match3 = PiCriterion.builder()
-                    .matchExact(
-                            PiMatchFieldId.of("hdr.ipv4.src_addr"),
-                            Ip4Address.valueOf(serverString.split("/")[1]).toOctets() )
-                    .build();
-
+            //TODO create function to do this default action
+            //set initial flows for servers
+            String serverName = serverString.split("/")[2];
+            serverFlowsStorage.put(serverName, new ServerFlows(serverString, nFlows));
+            
+            //populate unset_server_table
+            PiCriterion unsetCriterion = PiCriterion.builder()
+                .matchExact(
+                        PiMatchFieldId.of("hdr.ipv4.src_addr"),
+                        Ip4Address.valueOf(serverString.split("/")[1]).toOctets() )
+                .build();
             List<PiActionParam> params = new LinkedList<PiActionParam>();
             params.add(new PiActionParam(
                 PiActionParamId.of("mac"),
@@ -291,16 +259,18 @@ public class LoadBalancerComponent {
             params.add(new PiActionParam(
                 PiActionParamId.of("ip"),
                 loadBalancerConfig.myVirtualIp.toOctets()));
-            PiTableAction action3 = PiAction.builder()
-                    .withId(PiActionId.of("IngressPipeImpl.unset_server"))
-                    .withParameters(params)
-                    .build();
+            PiTableAction unsetAction = PiAction.builder()
+                .withId(PiActionId.of("IngressPipeImpl.unset_server"))
+                .withParameters(params)
+                .build();
     
-            FlowRule myStationRule3 = Utils.buildFlowRule(
-                    deviceId, appId, tableId3, match3, action3);
-    
-            flowRuleService.applyFlowRules(myStationRule3);
+            unsetServerRules[i++] = Utils.buildFlowRule(
+                deviceId, appId, "IngressPipeImpl.unset_server_table", 
+                unsetCriterion, unsetAction);
         }
+                
+        flowRuleService.applyFlowRules(unsetServerRules);
+        applyServerFlowsStorage(deviceId);
     }
 
     //pre-load onlineServers with serverConfig string
@@ -322,17 +292,51 @@ public class LoadBalancerComponent {
     }
 
     //Install flow rules for servers
-    class ServerLoad {
-        public String server;
-        public int load;
-        public ServerLoad (String server, int load){
-            this.server = server;
-            this.load = load;
+    public void applyServerFlowsStorage(DeviceId deviceId){
+        int total = serverFlowsStorage.values().stream()
+            .map(serverFlows -> serverFlows.flows)
+            .reduce(0, (load1, load2) -> load1 + load2);
+        // log.info("Install server flows, total: {}", Integer.toString(total));
+        if (total > 64){
+            log.info("Total flows > 64, aborting...");
+            return;
         }
-    }
 
-    public void InstallServerFlows(ServerLoad ... serverLoadArray){
+        int i = 0;
+        int start = 0;
+        FlowRule[] rules = new FlowRule[serverFlowsStorage.size()];
 
+        for (ServerFlows serverFlows : serverFlowsStorage.values()) {
+            int end = start + serverFlows.flows - 1;
+
+            PiCriterion criterion = PiCriterion.builder()
+                .matchRange(
+                    PiMatchFieldId.of("local_metadata.next_server"),
+                    start,
+                    end )
+                .build();
+                
+            List<PiActionParam> params = new LinkedList<PiActionParam>();
+            params.add(new PiActionParam(
+                PiActionParamId.of("mac"), 
+                serverFlows.mac.toBytes()));
+            params.add(new PiActionParam(
+                PiActionParamId.of("ip"),
+                serverFlows.ip.toOctets()));
+            PiTableAction action = PiAction.builder()
+                .withId(PiActionId.of("IngressPipeImpl.set_next_server"))
+                .withParameters(params)
+                .build();
+            FlowRule flowRule = Utils.buildFlowRule(
+                deviceId, appId, "IngressPipeImpl.load_balancer_table", criterion, action);
+            
+            log.info("Installing {} flows for {}", serverFlows.flows, serverFlows.name);
+            rules[i] = flowRule;
+            start = end + 1;
+            i++;
+        }
+            
+        flowRuleService.applyFlowRules(rules);
     }
 
     //--------------------------------------------------------------------------
@@ -381,30 +385,6 @@ public class LoadBalancerComponent {
         }
     }
 
-    class InternalLinkListener implements LinkListener {
-
-        @Override
-        public boolean isRelevant(LinkEvent event) {
-            switch (event.type()) {
-                case LINK_ADDED:
-                    break;
-                case LINK_UPDATED:
-                case LINK_REMOVED:
-                default:
-                    return false;
-            }
-            DeviceId srcDev = event.subject().src().deviceId();
-            DeviceId dstDev = event.subject().dst().deviceId();
-            return mastershipService.isLocalMaster(srcDev) ||
-                    mastershipService.isLocalMaster(dstDev);
-        }
-
-        @Override
-        public void event(LinkEvent event) {
-
-        }
-    }
-
     /**
      * Listener of device events which triggers configuration of the My Station
      * table.
@@ -439,34 +419,35 @@ public class LoadBalancerComponent {
 
     class InternalPacketProcessor implements PacketProcessor {
 
+        //TODO refactor to use the new flow rule algorithm
         //cpu load algorithm
-        public void processLoad(DeviceId deviceId, String[] serverLoadArray) {
+        public void processCpu(DeviceId deviceId, String[] serverLoadArray) {
             float load = Float.parseFloat(serverLoadArray[2]);
-            serverLoadStorage.put(serverLoadArray[0], load);
+            serverCpuStorage.put(serverLoadArray[0], load);
 
             if(onlineServers.size() == 0){
                 log.info("No servers online");
                 return;
             } else {
                 for (String srv : onlineServers.keySet()) {
-                    if (!serverLoadStorage.containsKey(srv)){
+                    if (!serverCpuStorage.containsKey(srv)){
                         log.info("serverLoadStorage incomplete");
                         return; //storage does not contain all servers yet
                     }
                 }
             }
-            float totalLoad = serverLoadStorage.values().stream().reduce((float)0, Float::sum);
+            float totalLoad = serverCpuStorage.values().stream().reduce((float)0, Float::sum);
             if (totalLoad < 1){
                 log.info("Not enough load");
-                serverLoadStorage.clear();
+                serverCpuStorage.clear();
                 return;
             }
 
             List<String> roundRobin = new LinkedList<String>();
-            for (String srv : serverLoadStorage.keySet()){
-                float srvLoad = serverLoadStorage.get(srv);
+            for (String srv : serverCpuStorage.keySet()){
+                float srvLoad = serverCpuStorage.get(srv);
 
-                int weigth = serverLoadStorage.size() == 1 ? 16 :
+                int weigth = serverCpuStorage.size() == 1 ? 16 :
                     (int) Math.ceil( (1.0 - (srvLoad / totalLoad)) * 16.0);
                 for (int j = 0; j < weigth; j++){
                     roundRobin.add(onlineServers.get(srv));
@@ -508,14 +489,61 @@ public class LoadBalancerComponent {
             }
             
             //delete storage
-            serverLoadStorage.clear();
+            serverCpuStorage.clear();
 
         }
 
         //reponse time algorithm
-        public void processTimer(DeviceId deviceId, String[] serverArray){
+        public void processLatency(DeviceId deviceId, String[] serverLatencyArray){
 
-            //TODO basically the same as the cpu load distribution algorithm, but with the average time between cpu loads
+            synchronized(serverLatencyStorage){
+    
+                //TODO discuss average vs sum vs max latency
+                String serverName = serverLatencyArray[0];
+                // float avgLatency = Float.parseFloat(serverLatencyArray[2]);
+                float sumLatency = Float.parseFloat(serverLatencyArray[3]);
+    
+                //update serverLatencyStorage
+                serverLatencyStorage.put(serverName, sumLatency);
+    
+                //error checking
+                if(onlineServers.size() == 0){
+                    log.info("No servers online");
+                    return;
+                } else {
+                    for (String srv : onlineServers.keySet()) {
+                        if (!serverLatencyStorage.containsKey(srv)){
+                            return; //storage does not contain all servers yet
+                        }
+                    }
+                }
+    
+                //algorithm
+                Entry<String, Float> max = serverLatencyStorage.entrySet().stream()
+                    .max((entry1, entry2) -> entry1.getValue() > entry2.getValue() ? 1 : -1).get();
+                Entry<String, Float> min = serverLatencyStorage.entrySet().stream()
+                    .min((entry1, entry2) -> entry1.getValue() > entry2.getValue() ? 1 : -1).get();
+                
+                //only update flows if they are at least 10% different    
+                float diff = Math.abs(max.getValue() / min.getValue() -1);
+                if (diff >= 0.1){
+
+                    //remove one flow to max
+                    serverFlowsStorage.get(max.getKey()).flows -= 1;
+                    //add one flow to min
+                    serverFlowsStorage.get(min.getKey()).flows += 1;
+        
+                    //apply changes to serverFlowsStorage
+                    applyServerFlowsStorage(deviceId);
+
+                } else {
+                    log.info("Similar values (<10% diff), aborting...");
+                }
+
+                //reset serverLatencyStorage
+                serverLatencyStorage.clear();
+            }
+
         }
 
 
@@ -525,7 +553,7 @@ public class LoadBalancerComponent {
             MacAddress mac = context.inPacket().parsed().getDestinationMAC();
             MacAddress lbMac = MacAddress.valueOf("00:aa:00:00:00:ff");
             if (mac.equals(lbMac)) {
-                synchronized (serverLoadStorage){ //lock variable
+                synchronized (serverFlowsStorage){ //lock variable
 
                     ByteBuffer buffer = context.inPacket().unparsed().position(42); //body start position
                     byte[] body = new byte[64];
@@ -539,16 +567,16 @@ public class LoadBalancerComponent {
                     DeviceId deviceId = context.inPacket().receivedFrom().deviceId();
                     String[] serverLoadArray = serverLoad.split(":");
 
-                    if (serverLoadArray[1].equals("timer")){
-                        processTimer(deviceId, serverLoadArray);
+                    //type of message
+                    if (serverLoadArray[1].equals("latency")){
+                        processLatency(deviceId, serverLoadArray);
                         return;
                     } else if (serverLoadArray[1].equals("cpu")){
-                        processLoad(deviceId, serverLoadArray);
+                        processCpu(deviceId, serverLoadArray);
                         return;
                     } else {
                         log.info("Invalid command: {}", serverLoad);
                     }
-
                 }
             }
         }

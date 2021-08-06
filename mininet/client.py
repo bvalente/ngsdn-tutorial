@@ -1,35 +1,37 @@
-
-
-#http request servers
-#gather info
-#plot chart
-
-#16 requests in paralel
-
-import json, requests
+import json, requests, csv
 from threading import Thread
 from time import sleep
 
 URL = 'http://10.0.0.1'
 
+runs = 16
+nRequests = 64
 list = []
+header = ["id", "run", "runId", "server"]
+dataStorage = []
 
 def sortFunc(item):
   return item['id']
 
-def request(id):
+def sortFunc2(item):
+    return item[0]
+
+def request(id, run, runId):
 	resp = requests.get(URL)
 	data = resp.json()
-	list.append( {'id': id, 'server': data['server']} )
+	list.append( {'id': id, 'run': run, 'runId': runId, 'server': data['server']} )
+	global dataStorage
+	dataStorage.append([id, run, runId, data['server']])
 	# print(data)
 
 index = 1
-for i in range(0,4):
+for i in range(0, runs):
 
-	#create 16 request threads
+	print("sending run %s, requests %s - %s" % (i, str(i*nRequests), str((i+1)*nRequests-1)) )
+	#create n request threads
 	threads = []
-	for j in range(0,16):
-		t = Thread(target=request, args=(index,))
+	for j in range(0, nRequests):
+		t = Thread(target=request, args=(index, i, j))
 		index += 1
 		threads.append(t)
 		t.start()
@@ -38,13 +40,19 @@ for i in range(0,4):
 	for t in threads:
 		t.join()
 	
-	#sleep 1 second before next batch of requests
-	sleep(1)
+	#sleep 3 second before next batch of requests
+	sleep(3)
 
 
 list.sort(key=sortFunc)
-# print(list)
+dataStorage.sort(key=sortFunc2)
 out = {}
 out['list'] = list
 with open('/tmp/data.json', 'w') as outfile:
     json.dump(out, outfile)
+with open('/tmp/data.csv', 'w') as f:
+    write = csv.writer(f) 
+    write.writerow(header)
+    write.writerows(dataStorage)
+
+#TODO maybe delete json implementation, including 'list' object
