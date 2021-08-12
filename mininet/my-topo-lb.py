@@ -68,7 +68,7 @@ class IPv4Server(IPv4Host):
                **_params):
         super(IPv4Server, self).config(mac, ip, defaultRoute, lo, **_params)
 
-        self.cmd('python /mininet/server.py --server-name %s &' % self.name)
+        self.cmd('python /mininet/server.py %s &' % self.name)
 
 class TutorialTopo(Topo):
     """Simple topo please
