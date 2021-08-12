@@ -519,25 +519,30 @@ public class LoadBalancerComponent {
                 }
     
                 //algorithm
-                Entry<String, Float> max = serverLatencyStorage.entrySet().stream()
+                Entry<String, Float> maxLatency = serverLatencyStorage.entrySet().stream()
                     .max((entry1, entry2) -> entry1.getValue() > entry2.getValue() ? 1 : -1).get();
-                Entry<String, Float> min = serverLatencyStorage.entrySet().stream()
+                Entry<String, Float> minLatency = serverLatencyStorage.entrySet().stream()
                     .min((entry1, entry2) -> entry1.getValue() > entry2.getValue() ? 1 : -1).get();
                 
+                float diff = Math.abs(maxLatency.getValue() / minLatency.getValue() -1);
+                int maxLatencyFlows = serverFlowsStorage.get(maxLatency.getKey()).flows;
+                
+                if (maxLatencyFlows <= 10){
+                    //entry cannot go below 10 flows
+                    log.info("Flows at minimum of 10, aborting...");
+                } else if (diff < 0.1){
                 //only update flows if they are at least 10% different    
-                float diff = Math.abs(max.getValue() / min.getValue() -1);
-                if (diff >= 0.1){
+                    log.info("Similar values (<10% diff), aborting...");
+                } else {
 
                     //remove one flow to max
-                    serverFlowsStorage.get(max.getKey()).flows -= 1;
+                    serverFlowsStorage.get(maxLatency.getKey()).flows -= 1;
                     //add one flow to min
-                    serverFlowsStorage.get(min.getKey()).flows += 1;
+                    serverFlowsStorage.get(minLatency.getKey()).flows += 1;
         
                     //apply changes to serverFlowsStorage
                     applyServerFlowsStorage(deviceId);
 
-                } else {
-                    log.info("Similar values (<10% diff), aborting...");
                 }
 
                 //reset serverLatencyStorage
