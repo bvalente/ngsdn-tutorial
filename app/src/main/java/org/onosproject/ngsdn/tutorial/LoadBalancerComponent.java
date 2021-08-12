@@ -59,6 +59,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -94,6 +95,7 @@ public class LoadBalancerComponent {
     private HashMap<String, Float> serverLatencyStorage;
     private HashMap<String, ServerFlows> serverFlowsStorage;
     private HashMap<String, String> onlineServers;
+    private List<FlowRule> currentFlowRules;
     
     //Aux object
     class ServerFlows {
@@ -162,6 +164,7 @@ public class LoadBalancerComponent {
         serverLatencyStorage = new HashMap<String, Float>();
         serverFlowsStorage = new HashMap<String, ServerFlows>();
         onlineServers = new HashMap<String, String>();
+        currentFlowRules = new ArrayList<FlowRule>();
 
         hostService.addListener(hostListener);
         deviceService.addListener(deviceListener);
@@ -335,8 +338,14 @@ public class LoadBalancerComponent {
             start = end + 1;
             i++;
         }
-            
+        
+        //remove old rules
+        flowRuleService.removeFlowRules(currentFlowRules.toArray(new FlowRule[0]));
+        //save new rules
+        currentFlowRules = new ArrayList<FlowRule>(Arrays.asList(rules));
+        //apply new rules
         flowRuleService.applyFlowRules(rules);
+
     }
 
     //--------------------------------------------------------------------------
@@ -531,7 +540,7 @@ public class LoadBalancerComponent {
                     //entry cannot go below 10 flows
                     log.info("Flows at minimum of 10, aborting...");
                 } else if (diff < 0.1){
-                //only update flows if they are at least 10% different    
+                    //only update flows if they are at least 10% different    
                     log.info("Similar values (<10% diff), aborting...");
                 } else {
 
