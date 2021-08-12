@@ -500,11 +500,11 @@ public class LoadBalancerComponent {
     
                 //TODO discuss average vs sum vs max latency
                 String serverName = serverLatencyArray[0];
-                // float avgLatency = Float.parseFloat(serverLatencyArray[2]);
-                float sumLatency = Float.parseFloat(serverLatencyArray[3]);
+                float latency = Float.parseFloat(serverLatencyArray[2]); //avgLatency
+                // float latency = Float.parseFloat(serverLatencyArray[3]); //sumLatency
     
                 //update serverLatencyStorage
-                serverLatencyStorage.put(serverName, sumLatency);
+                serverLatencyStorage.put(serverName, latency);
     
                 //error checking
                 if(onlineServers.size() == 0){
