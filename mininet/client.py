@@ -1,4 +1,4 @@
-import json, requests, csv
+import json, requests, csv, datetime
 from threading import Thread
 from time import sleep
 
@@ -6,23 +6,18 @@ URL = 'http://10.0.0.1'
 
 runs = 16
 nRequests = 64
-list = []
-header = ["id", "run", "runId", "server"]
+SLEEP = 1.5
+header = ["id", "run", "runId", "server", "elapsed"]
 dataStorage = []
 
 def sortFunc(item):
-  return item['id']
-
-def sortFunc2(item):
     return item[0]
 
 def request(id, run, runId):
 	resp = requests.get(URL)
 	data = resp.json()
-	list.append( {'id': id, 'run': run, 'runId': runId, 'server': data['server']} )
 	global dataStorage
-	dataStorage.append([id, run, runId, data['server']])
-	# print(data)
+	dataStorage.append([id, run, runId, data['server'], resp.elapsed])
 
 index = 1
 for i in range(0, runs):
@@ -40,19 +35,13 @@ for i in range(0, runs):
 	for t in threads:
 		t.join()
 	
-	#sleep 3 second before next batch of requests
-	sleep(3)
+	#sleep x second before next batch of requests
+	sleep(SLEEP)
 
 
-list.sort(key=sortFunc)
-dataStorage.sort(key=sortFunc2)
-out = {}
-out['list'] = list
-with open('/tmp/data.json', 'w') as outfile:
-    json.dump(out, outfile)
-with open('/tmp/data.csv', 'w') as f:
+dataStorage.sort(key=sortFunc)
+csvFile = '/tmp/data_{}.csv'.format( datetime.datetime.now().strftime('%Y%m%d%H%M%S') )
+with open(csvFile, 'w') as f:
     write = csv.writer(f) 
     write.writerow(header)
     write.writerows(dataStorage)
-
-#TODO maybe delete json implementation, including 'list' object
