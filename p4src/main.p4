@@ -718,6 +718,11 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
                         tcp_flows_ip.read(
                             hdr.ipv4.dst_addr, 
                             (bit<32>)tcp_hash);
+                        
+                        if(hdr.tcp.ctrl & 0x1 == 1){ //FIN flag
+                            //end communication, remove tcp hash flow
+                            has_tcp_flow.write((bit<32>)tcp_hash, (bit<1>)0);
+                        }
 
                     } else {
                         //set next server and save
