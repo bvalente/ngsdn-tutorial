@@ -1,4 +1,4 @@
-import json, requests, csv, datetime
+import json, requests, csv, datetime, time
 from threading import Thread
 from time import sleep
 
@@ -14,10 +14,13 @@ def sortFunc(item):
     return item[0]
 
 def request(id, run, runId):
+	start = time.time()
 	resp = requests.get(URL)
+	end = time.time() - start
 	data = resp.json()
 	global dataStorage
-	dataStorage.append([id, run, runId, data['server'], resp.elapsed])
+	dataStorage.append([id, run, runId, data['server'], end])
+	# print(end)
 
 index = 1
 for i in range(0, runs):
@@ -40,7 +43,7 @@ for i in range(0, runs):
 
 
 dataStorage.sort(key=sortFunc)
-csvFile = '/tmp/data_{}.csv'.format( datetime.datetime.now().strftime('%Y%m%d%H%M%S') )
+csvFile = '/tmp/data_{}.csv'.format( datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S') )
 with open(csvFile, 'w') as f:
     write = csv.writer(f) 
     write.writerow(header)

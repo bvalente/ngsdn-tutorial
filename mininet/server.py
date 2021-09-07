@@ -8,8 +8,11 @@ import logging
 CONTROLLER_IP = "10.0.0.254"
 CONTROLLER_MAC = "00:aa:00:00:00:ff"
 PORT = 80
+LB=True
 CPU=False
-LATENCY=True
+# LATENCY=True
+LATENCY=False
+COUNT=0
 
 latencyListGlobal = []
 
@@ -111,14 +114,18 @@ def MakeGetHandler(args):
             self._set_headers()
             self.wfile.write(json.dumps({'server': self.serverName}))
 
-            #artificial load/l  atency
-            if (self.serverName == "server1"):
-                logging.debug("sleeping 0.07")
-                time.sleep(0.07)
-            elif (self.serverName == "server2"):
-                # cpuLoad(1000)
-                logging.debug("sleeping 0.1")
-                time.sleep(0.1) # alternative for artificial latency
+            #artificial load/latency
+            if(LB):
+                SLEEP1 = 0.007
+                SLEEP2 = 0.009
+                if (self.serverName == "server1"):
+                    # logging.debug("sleeping %s" % SLEEP1)
+                    # time.sleep(SLEEP1)
+                    cpuLoad(800)
+                elif (self.serverName == "server2"):
+                    # logging.debug("sleeping %s" % SLEEP2)
+                    # time.sleep(SLEEP2) # alternative for artificial latency
+                    cpuLoad(1000)
     
     return GetHandler
 
