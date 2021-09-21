@@ -10,9 +10,10 @@ CONTROLLER_MAC = "00:aa:00:00:00:ff"
 PORT = 80
 LB=True
 CPU=False
-# LATENCY=True
-LATENCY=False
+LATENCY=True
+# LATENCY=False
 COUNT=0
+CLIENT_SLEEP=1.5
 
 latencyListGlobal = []
 
@@ -39,6 +40,11 @@ def cpuLoad(load):
         x = random.random()
         x * x ** x
 
+def subtractCount():
+    global COUNT
+    time.sleep(CLIENT_SLEEP)
+    COUNT -= 1
+
 #TODO should also send max value?
 # receive list with time taken to process each GET and calculate the average
 def sendLatencyList(serverName, latencyList):
@@ -59,7 +65,7 @@ def sendLatencyLoop(args, alive, mySocket):
     while alive[0]:
         time.sleep(3)
         if (len(latencyListGlobal) > 0):
-            #format: serverName:latency:<avg latency>:<sum latency>
+            #format: serverName:latency:<avg latency>:<sum latency>:<max latency>
             message = args.serverName + ":latency:" + str(sum(latencyListGlobal) / len(latencyListGlobal)) + ":" + str(sum(latencyListGlobal)) + ":" + str(max(latencyListGlobal))
             byte_message = message.encode("utf-8")
             try:
@@ -92,9 +98,15 @@ def MakeGetHandler(args):
             self.end_headers()
         
         def handle_one_request(self):
+            global COUNT
+            COUNT += 1
             start = time.time()
             logging.debug("Request received")
+
             SimpleHTTPServer.SimpleHTTPRequestHandler.handle_one_request(self)
+
+            # COUNT -= 1
+            threading.Thread(target=subtractCount).start()
             end = time.time() - start
             logging.debug("Request took %s sec" % end)
 
@@ -116,16 +128,24 @@ def MakeGetHandler(args):
 
             #artificial load/latency
             if(LB):
+                global COUNT
+                SLEEP_INCREMENT = 0.0005
                 SLEEP1 = 0.007
                 SLEEP2 = 0.009
                 if (self.serverName == "server1"):
-                    # logging.debug("sleeping %s" % SLEEP1)
-                    # time.sleep(SLEEP1)
-                    cpuLoad(800)
+                    if (LATENCY):
+                        SLEEP1 = SLEEP1 if COUNT < 16 else SLEEP1 + (COUNT-16)*SLEEP_INCREMENT
+                        logging.debug("sleeping %s with %s connections" % (SLEEP1, COUNT))
+                        time.sleep(SLEEP1)
+                    if (CPU):
+                        cpuLoad(800)
+
                 elif (self.serverName == "server2"):
-                    # logging.debug("sleeping %s" % SLEEP2)
-                    # time.sleep(SLEEP2) # alternative for artificial latency
-                    cpuLoad(1000)
+                    if (LATENCY):
+                        logging.debug("sleeping %s" % SLEEP2)
+                        time.sleep(SLEEP2)
+                    if (CPU):
+                        cpuLoad(1000)
     
     return GetHandler
 
