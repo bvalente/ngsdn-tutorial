@@ -14,6 +14,8 @@ LATENCY=True
 # LATENCY=False
 COUNT=0
 CLIENT_SLEEP=1.5
+PREV_BATCH=0
+BATCH_TRIGGER=True
 
 latencyListGlobal = []
 
@@ -41,9 +43,12 @@ def cpuLoad(load):
         x * x ** x
 
 def subtractCount():
-    global COUNT
+    global PREV_BATCH, COUNT, BATCH_TRIGGER
     time.sleep(CLIENT_SLEEP)
-    COUNT -= 1
+    logging.debug("Update previous batch")
+    PREV_BATCH=COUNT
+    COUNT=0
+    BATCH_TRIGGER=True
 
 #TODO should also send max value?
 # receive list with time taken to process each GET and calculate the average
@@ -98,7 +103,7 @@ def MakeGetHandler(args):
             self.end_headers()
         
         def handle_one_request(self):
-            global COUNT
+            global COUNT, BATCH_TRIGGER
             COUNT += 1
             start = time.time()
             logging.debug("Request received")
@@ -106,7 +111,10 @@ def MakeGetHandler(args):
             SimpleHTTPServer.SimpleHTTPRequestHandler.handle_one_request(self)
 
             # COUNT -= 1
-            threading.Thread(target=subtractCount).start()
+            if BATCH_TRIGGER:
+                logging.debug("Batch Trigger")
+                threading.Thread(target=subtractCount).start()
+                BATCH_TRIGGER=False
             end = time.time() - start
             logging.debug("Request took %s sec" % end)
 
@@ -132,10 +140,17 @@ def MakeGetHandler(args):
                 SLEEP_INCREMENT = 0.0005
                 SLEEP1 = 0.007
                 SLEEP2 = 0.009
+                SLEEP3 = 0.011
                 if (self.serverName == "server1"):
                     if (LATENCY):
-                        SLEEP1 = SLEEP1 if COUNT < 16 else SLEEP1 + (COUNT-16)*SLEEP_INCREMENT
-                        logging.debug("sleeping %s with %s connections" % (SLEEP1, COUNT))
+                        # SLEEP1 = SLEEP1 if COUNT < 16 else SLEEP1 + (COUNT-16)*SLEEP_INCREMENT
+                        # logging.debug("sleeping %s with %s connections" % (SLEEP1, COUNT))
+                        # SLEEP1 = SLEEP1 if PREV_BATCH < 16 else (SLEEP2 if PREV_BATCH < 24 else SLEEP3)
+                        if PREV_BATCH > 24:
+                            SLEEP1 = SLEEP3
+                        elif PREV_BATCH > 16:
+                            SLEEP1 = SLEEP2
+                        logging.debug("sleeping %s with %s prev_batch" % (SLEEP1, PREV_BATCH))
                         time.sleep(SLEEP1)
                     if (CPU):
                         cpuLoad(800)
