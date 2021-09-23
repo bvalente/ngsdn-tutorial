@@ -64,6 +64,12 @@ start-v4: _start
 start-gtp: NGSDN_TOPO_PY := topo-gtp.py
 start-gtp: _start
 
+pause:
+	@NGSDN_TOPO_PY=foo docker-compose pause
+
+unpause:
+	@NGSDN_TOPO_PY=foo docker-compose unpause
+
 stop:
 	$(info *** Stopping ONOS and Mininet...)
 	@NGSDN_TOPO_PY=foo docker-compose down -t0

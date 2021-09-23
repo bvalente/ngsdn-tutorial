@@ -4,8 +4,9 @@ from time import sleep
 
 URL = 'http://10.0.0.1'
 
-runs = 16
+runs = 32
 nRequests = 64
+miniSLEEP = 0.1
 SLEEP = 1.5
 header = ["id", "run", "runId", "server", "elapsed"]
 dataStorage = []
@@ -14,11 +15,11 @@ def sortFunc(item):
     return item[0]
 
 def request(id, run, runId):
+	global dataStorage
 	start = time.time()
 	resp = requests.get(URL)
 	end = time.time() - start
 	data = resp.json()
-	global dataStorage
 	dataStorage.append([id, run, runId, data['server'], end])
 	# print(end)
 
@@ -33,6 +34,7 @@ for i in range(0, runs):
 		index += 1
 		threads.append(t)
 		t.start()
+		sleep(miniSLEEP) #less stress on the servers
 	
 	#wait for all threads
 	for t in threads:

@@ -539,9 +539,9 @@ public class LoadBalancerComponent {
                 if (maxLatencyFlows <= 10){
                     //entry cannot go below 10 flows
                     log.info("Flows at minimum of 10, aborting...");
-                } else if (diff < 0.1){
+                } else if (diff < 0.2){
                     //only update flows if they are at least 10% different    
-                    log.info("Similar values (<10% diff), aborting...");
+                    log.info("Similar values (<20% diff), aborting...");
                 } else {
 
                     //remove one flow to max
@@ -570,10 +570,15 @@ public class LoadBalancerComponent {
                 synchronized (serverFlowsStorage){ //lock variable
 
                     ByteBuffer buffer = context.inPacket().unparsed().position(42); //body start position
-                    byte[] body = new byte[64];
+                    int max = 128;
+                    byte[] body = new byte[max];
                     int i = 0;
                     while (buffer.hasRemaining()){
-                        body[i++] = buffer.get();
+                        if (i >= max){
+                            log.warn("Exception avoided! i = {}", i);
+                            break;
+                        }
+                        body[i++] = buffer.get(); //exception Index out of bounds here
                     }
                     String serverLoad = new String(body, StandardCharsets.UTF_8);
                     log.info("Server Load Packet: {}", serverLoad);

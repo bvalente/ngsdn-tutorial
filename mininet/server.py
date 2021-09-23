@@ -13,7 +13,7 @@ CPU=False
 LATENCY=True
 # LATENCY=False
 COUNT=0
-CLIENT_SLEEP=1.5
+CLIENT_SLEEP=1.5 + 0.1*64
 PREV_BATCH=0
 BATCH_TRIGGER=True
 
@@ -50,6 +50,13 @@ def subtractCount():
     COUNT=0
     BATCH_TRIGGER=True
 
+def calculateSleep(sleepBase, sleepIncrement, conTrigger, conCount):
+    if conCount <= conTrigger:
+        return sleepBase
+    else:
+        diff = conCount - conTrigger
+        return sleepBase + diff*sleepIncrement
+
 #TODO should also send max value?
 # receive list with time taken to process each GET and calculate the average
 def sendLatencyList(serverName, latencyList):
@@ -68,7 +75,7 @@ def sendLatencyList(serverName, latencyList):
 def sendLatencyLoop(args, alive, mySocket):
     global latencyListGlobal
     while alive[0]:
-        time.sleep(3)
+        time.sleep(CLIENT_SLEEP)
         if (len(latencyListGlobal) > 0):
             #format: serverName:latency:<avg latency>:<sum latency>:<max latency>
             message = args.serverName + ":latency:" + str(sum(latencyListGlobal) / len(latencyListGlobal)) + ":" + str(sum(latencyListGlobal)) + ":" + str(max(latencyListGlobal))
@@ -92,7 +99,7 @@ def MakeGetHandler(args):
         def __init__(self, request, client_address, server):
             self.serverName = args.serverName
             SimpleHTTPServer.SimpleHTTPRequestHandler.__init__(self, request, client_address, server)
-            logging.debug("Handler Started")
+            # logging.debug("Handler Started")
 
         def log_message(self, format, *args):
             pass
@@ -121,7 +128,7 @@ def MakeGetHandler(args):
             if(LATENCY):
                 global latencyListGlobal
                 latencyListGlobal += [end]
-                logging.debug("Latency List: %s" % ', '.join(map(str, latencyListGlobal)) )
+                # logging.debug("Latency List: %s" % ', '.join(map(str, latencyListGlobal)) )
 
                 if (len(latencyListGlobal) >= 10 and False): #disable send list here
                     sendlatencyList(self.serverName, latencyListGlobal)
@@ -136,29 +143,23 @@ def MakeGetHandler(args):
 
             #artificial load/latency
             if(LB):
-                global COUNT
-                SLEEP_INCREMENT = 0.0005
-                SLEEP1 = 0.007
-                SLEEP2 = 0.009
-                SLEEP3 = 0.011
+                global PREV_BATCH
+                sleepBase = 0.005
+                sleepIncrement = 0.0005
+                connections = PREV_BATCH
                 if (self.serverName == "server1"):
                     if (LATENCY):
-                        # SLEEP1 = SLEEP1 if COUNT < 16 else SLEEP1 + (COUNT-16)*SLEEP_INCREMENT
-                        # logging.debug("sleeping %s with %s connections" % (SLEEP1, COUNT))
-                        # SLEEP1 = SLEEP1 if PREV_BATCH < 16 else (SLEEP2 if PREV_BATCH < 24 else SLEEP3)
-                        if PREV_BATCH > 24:
-                            SLEEP1 = SLEEP3
-                        elif PREV_BATCH > 16:
-                            SLEEP1 = SLEEP2
-                        logging.debug("sleeping %s with %s prev_batch" % (SLEEP1, PREV_BATCH))
-                        time.sleep(SLEEP1)
+                        sleep = calculateSleep(sleepBase, sleepIncrement, 40, connections)
+                        logging.debug("sleeping %s with %s connections" % (sleep, connections))
+                        time.sleep(sleep)
                     if (CPU):
                         cpuLoad(800)
 
                 elif (self.serverName == "server2"):
                     if (LATENCY):
-                        logging.debug("sleeping %s" % SLEEP2)
-                        time.sleep(SLEEP2)
+                        sleep = calculateSleep(sleepBase, sleepIncrement, 16, connections)
+                        logging.debug("sleeping %s with %s connections" % (sleep, connections))
+                        time.sleep(sleep)
                     if (CPU):
                         cpuLoad(1000)
     
