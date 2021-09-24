@@ -89,7 +89,7 @@ def sendLatencyLoop(args, alive, mySocket):
 def sendLatency(args, alive):
     mySocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     thread = threading.Thread(target=sendLatencyLoop, args=(args, alive, mySocket))
-    thread.start()
+    # thread.start() #enough to stop ALL Load Balancing
     return (mySocket, thread)
 
 def MakeGetHandler(args):
