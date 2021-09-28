@@ -14,7 +14,7 @@ LATENCY=True
 # LATENCY=False
 COUNT=0
 CLIENT_SLEEP=1.5 + 0.1*64
-PREV_BATCH=0
+PREV_BATCH=32 #start with the same N of flows of the controller
 BATCH_TRIGGER=True
 
 latencyListGlobal = []
@@ -45,32 +45,10 @@ def cpuLoad(load):
 def subtractCount():
     global PREV_BATCH, COUNT, BATCH_TRIGGER
     time.sleep(CLIENT_SLEEP)
-    logging.debug("Update previous batch")
+    logging.debug("Previous batch: %s, New Batch: %s" % (PREV_BATCH, COUNT))
     PREV_BATCH=COUNT
     COUNT=0
     BATCH_TRIGGER=True
-
-def calculateSleep(sleepBase, sleepIncrement, conTrigger, conCount):
-    if conCount <= conTrigger:
-        return sleepBase
-    else:
-        diff = conCount - conTrigger
-        return sleepBase + diff*sleepIncrement
-
-#TODO should also send max value?
-# receive list with time taken to process each GET and calculate the average
-def sendLatencyList(serverName, latencyList):
-    logging.debug("Sending latency to controller")
-    opened_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    #format: serverX:latency:<avg latency>:<sum latency>
-    message = serverName + ":latency:" + str(sum(latencyList) / len(latencyList)) + ":" + str(sum(latencyList))
-    byte_message = message.encode("utf-8")
-    try:
-        opened_socket.sendto(byte_message, (CONTROLLER_IP, 5005))
-    except:
-        pass
-    finally:
-        opened_socket.close()
 
 def sendLatencyLoop(args, alive, mySocket):
     global latencyListGlobal
@@ -113,26 +91,22 @@ def MakeGetHandler(args):
             global COUNT, BATCH_TRIGGER
             COUNT += 1
             start = time.time()
-            logging.debug("Request received")
+            # logging.debug("Request received")
 
-            SimpleHTTPServer.SimpleHTTPRequestHandler.handle_one_request(self)
-
-            # COUNT -= 1
             if BATCH_TRIGGER:
-                logging.debug("Batch Trigger")
+                # logging.debug("Batch Trigger")
                 threading.Thread(target=subtractCount).start()
                 BATCH_TRIGGER=False
+            
+            SimpleHTTPServer.SimpleHTTPRequestHandler.handle_one_request(self)
+
             end = time.time() - start
-            logging.debug("Request took %s sec" % end)
+            # logging.debug("Request took %s sec" % end)
 
             if(LATENCY):
                 global latencyListGlobal
                 latencyListGlobal += [end]
                 # logging.debug("Latency List: %s" % ', '.join(map(str, latencyListGlobal)) )
-
-                if (len(latencyListGlobal) >= 10 and False): #disable send list here
-                    sendlatencyList(self.serverName, latencyListGlobal)
-                    latencyListGlobal = []
 
         def do_HEAD(self):
             self._set_headers()
@@ -145,20 +119,20 @@ def MakeGetHandler(args):
             if(LB):
                 global PREV_BATCH
                 sleepBase = 0.005
-                sleepIncrement = 0.0005
+                sleepIncrement = [0.0004, 0.0008]
                 connections = PREV_BATCH
                 if (self.serverName == "server1"):
                     if (LATENCY):
-                        sleep = calculateSleep(sleepBase, sleepIncrement, 40, connections)
-                        logging.debug("sleeping %s with %s connections" % (sleep, connections))
+                        sleep = sleepIncrement[0] * connections + sleepBase
+                        # logging.debug("sleeping %s with %s connections" % (sleep, connections))
                         time.sleep(sleep)
                     if (CPU):
                         cpuLoad(800)
 
                 elif (self.serverName == "server2"):
                     if (LATENCY):
-                        sleep = calculateSleep(sleepBase, sleepIncrement, 16, connections)
-                        logging.debug("sleeping %s with %s connections" % (sleep, connections))
+                        sleep = sleepIncrement[1] * connections + sleepBase
+                        # logging.debug("sleeping %s with %s connections" % (sleep, connections))
                         time.sleep(sleep)
                     if (CPU):
                         cpuLoad(1000)
