@@ -5,7 +5,7 @@ from time import sleep
 URL = 'http://10.0.0.1'
 
 runs = 32
-nRequests = 64
+nRequests = 128
 miniSLEEP = 0.1
 SLEEP = 1.5
 header = ["id", "run", "runId", "server", "elapsed"]
