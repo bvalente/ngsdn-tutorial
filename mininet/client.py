@@ -6,8 +6,8 @@ URL = 'http://10.0.0.1'
 
 runs = 32
 nRequests = 128
-miniSLEEP = 0.1
-SLEEP = 1.5
+miniSLEEP = 0.08
+SLEEP = 15
 header = ["id", "run", "runId", "server", "elapsed"]
 dataStorage = []
 
@@ -17,10 +17,14 @@ def sortFunc(item):
 def request(id, run, runId):
 	global dataStorage
 	start = time.time()
-	resp = requests.get(URL)
-	end = time.time() - start
-	data = resp.json()
-	dataStorage.append([id, run, runId, data['server'], end])
+	try:
+		resp = requests.get(URL)
+		end = time.time() - start
+		data = resp.json()
+		dataStorage.append([id, run, runId, data['server'], end])
+	except: 
+		print("Exception on GET!")
+
 	# print(end)
 
 index = 1
@@ -41,7 +45,11 @@ for i in range(0, runs):
 		t.join()
 	
 	#sleep x second before next batch of requests
+	print("sleeping for %s seconds" % SLEEP)
 	sleep(SLEEP)
+
+	#waiting for user input
+	# enter = raw_input("Waiting for input")
 
 
 dataStorage.sort(key=sortFunc)
