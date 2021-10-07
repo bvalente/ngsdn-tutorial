@@ -14,7 +14,7 @@ LATENCY=True
 # LATENCY=False
 COUNT=0
 CLIENT_SLEEP=0.1*128
-PREV_BATCH=64 #start with the same N of flows of the controller
+PREV_BATCH=42 #start with the same N of flows of the controller
 BATCH_TRIGGER=True
 LATENCY_TRIGGER=True
 

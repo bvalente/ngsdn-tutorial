@@ -311,6 +311,7 @@ public class LoadBalancerComponent {
 
         for (ServerFlows serverFlows : serverFlowsStorage.values()) {
             int end = start + serverFlows.flows - 1;
+            if (end == 62) { end = 63;} //special case for odd number of servers
 
             PiCriterion criterion = PiCriterion.builder()
                 .matchRange(

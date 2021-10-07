@@ -19,7 +19,8 @@
 				"myVirtualIp": "10.0.0.1",
 				"servers": [
 					"00:00:00:00:10:10/10.0.10.1/server1",
-					"00:00:00:00:20:10/10.0.20.1/server2"
+					"00:00:00:00:20:10/10.0.20.1/server2",
+					"00:00:00:00:30:10/10.0.30.1/server3"
 				]
 			}
 		  }
@@ -58,6 +59,17 @@
 			"vlan-untagged": 100
 		  }
 		]
+	  },
+	  "device:loadbalancer/4": {
+		"interfaces": [
+		  {
+			"name": "loadbalancer-4",
+			"ips": [
+			  "10.0.0.1/16"
+			],
+			"vlan-untagged": 100
+		  }
+		]
 	  }
 	},
 	"hosts": {
@@ -83,6 +95,14 @@
 		  "locType": "grid",
 		  "gridX": 600,
 		  "gridY": 600
+		}
+	  },
+	  "00:00:00:00:30:10/None": {
+		"basic": {
+		  "name": "server3",
+		  "locType": "grid",
+		  "gridX": 600,
+		  "gridY": 800
 		}
 	  }
 	}
