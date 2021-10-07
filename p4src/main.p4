@@ -221,10 +221,10 @@ struct local_metadata_t {
     bit<8>      ip_proto;
     bit<8>      icmp_type;
     bit<16>     arp_op;
-    bit<6>      next_server;
+    bit<5>      next_server;
 }
 
-register<bit<6>>(1) next_server_register;
+register<bit<5>>(1) next_server_register;
 
 register<bit<1>>(8192) has_tcp_flow;
 
@@ -734,7 +734,7 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
                         //update next server
                         next_server_register.write(
                             (bit<32>)0, 
-                            local_metadata.next_server + (bit<6>)1); //will overflow
+                            local_metadata.next_server + (bit<5>)1); //will overflow
 
                         //lb_table will save next server in register
                         skip_lb_table = false;
@@ -752,7 +752,7 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
                     //update next server
                     next_server_register.write(
                         (bit<32>)0, 
-                        local_metadata.next_server + (bit<6>)1); // will overflow
+                        local_metadata.next_server + (bit<5>)1); // will overflow
 
                     //hit lb_table!
                     skip_lb_table = false;

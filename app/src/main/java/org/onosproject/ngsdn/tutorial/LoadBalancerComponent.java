@@ -238,7 +238,7 @@ public class LoadBalancerComponent {
         //----
         //initial load balancing configuration for all online servers
         int nServers = loadBalancerConfig.servers.size();
-        int nFlows = 64 / nServers;
+        int nFlows = 32 / nServers;
         FlowRule[] unsetServerRules = new FlowRule[nServers];
         int i = 0;
 
@@ -300,8 +300,8 @@ public class LoadBalancerComponent {
             .map(serverFlows -> serverFlows.flows)
             .reduce(0, (load1, load2) -> load1 + load2);
         // log.info("Install server flows, total: {}", Integer.toString(total));
-        if (total > 64){
-            log.info("Total flows > 64, aborting...");
+        if (total > 32){
+            log.info("Total flows > 32, aborting...");
             return;
         }
 
