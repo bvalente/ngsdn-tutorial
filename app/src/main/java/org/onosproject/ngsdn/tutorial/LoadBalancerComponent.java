@@ -536,12 +536,12 @@ public class LoadBalancerComponent {
                 float diff = Math.abs(maxLatency.getValue() / minLatency.getValue() -1);
                 int maxLatencyFlows = serverFlowsStorage.get(maxLatency.getKey()).flows;
                 
-                if (maxLatencyFlows <= 10){
-                    //entry cannot go below 10 flows
-                    log.info("Flows at minimum of 10, aborting...");
-                } else if (diff < 0.2){
-                    //only update flows if they are at least 10% different    
-                    log.info("Similar values (<20% diff), aborting...");
+                if (maxLatencyFlows <= 2){
+                    //entry cannot go below 2 flows
+                    log.info("Flows at minimum of 2, aborting...");
+                } else if (diff < 0.15){
+                    //only update flows if they are at least 15% different    
+                    log.info("Similar values (<15% diff), aborting...");
                 } else {
 
                     //remove one flow to max
