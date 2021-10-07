@@ -13,11 +13,17 @@ CPU=False
 LATENCY=True
 # LATENCY=False
 COUNT=0
-CLIENT_SLEEP=1.5 + 0.1*64
-PREV_BATCH=32 #start with the same N of flows of the controller
+CLIENT_SLEEP=0.1*128
+PREV_BATCH=64 #start with the same N of flows of the controller
 BATCH_TRIGGER=True
+LATENCY_TRIGGER=True
 
 latencyListGlobal = []
+
+def myExceptHook(exctype, value, tb):
+    logging.exception(exctype)
+    logging.exception(value)
+    logging.exception(tb)
 
 def sendCpuLoadLoop(args, alive, opened_socket):
     while alive[0]:
@@ -67,15 +73,33 @@ def sendLatencyLoop(args, alive, mySocket):
 def sendLatency(args, alive):
     mySocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     thread = threading.Thread(target=sendLatencyLoop, args=(args, alive, mySocket))
-    thread.start()
+    # thread.start()
     return (mySocket, thread)
 
-def MakeGetHandler(args):
+def sendLatencyOnTriggger(serverName, mySocket):
+    global latencyListGlobal
+    time.sleep(CLIENT_SLEEP)
+    # mySocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    if (len(latencyListGlobal) > 0):
+        #format: serverName:latency:<avg latency>:<sum latency>:<max latency>
+        message = serverName + ":latency:" + str(sum(latencyListGlobal) / len(latencyListGlobal)) + ":" + str(sum(latencyListGlobal)) + ":" + str(max(latencyListGlobal))
+        byte_message = message.encode("utf-8")
+        try:
+            mySocket.sendto(byte_message, (CONTROLLER_IP, 5005))
+            latencyListGlobal = [] #reset list
+        except:
+            pass 
+        # finally:
+        #     mySocket.close() 
+
+def MakeGetHandler(args, mySocket):
     
     class GetHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
         def __init__(self, request, client_address, server):
             self.serverName = args.serverName
+            # self.latencyThread = latencyThread
+            self.mySocket = mySocket
             SimpleHTTPServer.SimpleHTTPRequestHandler.__init__(self, request, client_address, server)
             # logging.debug("Handler Started")
 
@@ -88,7 +112,7 @@ def MakeGetHandler(args):
             self.end_headers()
         
         def handle_one_request(self):
-            global COUNT, BATCH_TRIGGER
+            global COUNT, BATCH_TRIGGER, LATENCY_TRIGGER
             COUNT += 1
             start = time.time()
             # logging.debug("Request received")
@@ -96,7 +120,13 @@ def MakeGetHandler(args):
             if BATCH_TRIGGER:
                 # logging.debug("Batch Trigger")
                 threading.Thread(target=subtractCount).start()
+
+                threading.Thread(target=sendLatencyOnTriggger, args=(self.serverName,mySocket)).start()
+
                 BATCH_TRIGGER=False
+                # if LATENCY_TRIGGER:
+                #     # self.latencyThread.start()
+                #     LATENCY_TRIGGER=False
             
             SimpleHTTPServer.SimpleHTTPRequestHandler.handle_one_request(self)
 
@@ -121,7 +151,7 @@ def MakeGetHandler(args):
                 sleepBase = 0.005
                 sleepIncrement = [0.0004, 0.0008]
                 connections = PREV_BATCH
-                if (self.serverName == "server1"):
+                if (self.serverName == "server1" or self.serverName == "server3"):
                     if (LATENCY):
                         sleep = sleepIncrement[0] * connections + sleepBase
                         # logging.debug("sleeping %s with %s connections" % (sleep, connections))
@@ -129,7 +159,7 @@ def MakeGetHandler(args):
                     if (CPU):
                         cpuLoad(800)
 
-                elif (self.serverName == "server2"):
+                elif (self.serverName == "server2" or self.serverName == "server4"):
                     if (LATENCY):
                         sleep = sleepIncrement[1] * connections + sleepBase
                         # logging.debug("sleeping %s with %s connections" % (sleep, connections))
@@ -150,10 +180,7 @@ def main():
     filename = "/tmp/%s.out" % args.serverName
     logging.basicConfig(filename=filename, encoding='utf-8', level=logging.DEBUG)
     logging.info("Server %s Started" % args.serverName)
-
-    #http server
-    HandlerClass = MakeGetHandler(args)
-    httpd = SocketServer.TCPServer(("", PORT), HandlerClass)
+    sys.excepthook = myExceptHook
 
     #inject controller in ARP Table
     os.system('arp -s %s %s' % (CONTROLLER_IP, CONTROLLER_MAC))
@@ -163,9 +190,15 @@ def main():
         cpuLoadAlive = [True] #pass variable by reference
         (cpuLoadSocket, cpuLoadThread) = sendCpuLoad(args, cpuLoadAlive)
     
-    if(LATENCY):
-        latencyAlive = [True] #pass variable by reference
-        (latencySocket, latencyThread) = sendLatency(args, latencyAlive)
+    # if(LATENCY):
+    #     latencyAlive = [True] #pass variable by reference
+    #     (latencySocket, latencyThread) = sendLatency(args, latencyAlive)
+    
+    #http server
+    # HandlerClass = MakeGetHandler(args, latencyThread)
+    mySocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    HandlerClass = MakeGetHandler(args, mySocket)
+    httpd = SocketServer.TCPServer(("", PORT), HandlerClass)
 
     #SIGINT
     def signal_handler(sig, frame):
@@ -177,11 +210,14 @@ def main():
             cpuLoadThread.join()
             cpuLoadSocket.close()
         
-        if (LATENCY):
-            logging.debug("Closing latency socket")
-            latencyAlive[0] = False
-            latencyThread.join()
-            latencySocket.close()
+        # if (LATENCY):
+        #     logging.debug("Closing latency socket")
+        #     latencyAlive[0] = False
+        #     if latencyThread.is_alive():
+        #         latencyThread.join()
+        #     latencySocket.close()
+
+        mySocket.close()
 
         logging.debug("Shutdown httpd")
         threading.Thread(target=httpd.shutdown).start()
