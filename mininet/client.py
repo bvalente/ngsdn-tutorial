@@ -45,11 +45,11 @@ for i in range(0, runs):
 		t.join()
 	
 	#sleep x second before next batch of requests
-	# print("sleeping for %s seconds" % SLEEP)
-	# sleep(SLEEP)
+	print("sleeping for %s seconds" % SLEEP)
+	sleep(SLEEP)
 
 	#waiting for user input
-	enter = raw_input("Waiting for input")
+	# enter = raw_input("Waiting for input")
 
 
 dataStorage.sort(key=sortFunc)

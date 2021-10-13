@@ -104,6 +104,7 @@ public class LoadBalancerComponent {
     private int currentPriority;
 
     private int FLOWS = 64;
+    private double RATIO = 0.15;
     
     //Aux object
     class ServerFlows {
@@ -441,7 +442,7 @@ public class LoadBalancerComponent {
         @Override
         public void event(HostEvent event) {
             String hostName = event.subject().annotations().value("name");
-            if (hostName.contains("server")){
+            if (hostName != null && hostName.contains("server")){
                 if (event.type() == Type.HOST_ADDED){
                     serverOnline(event.subject());
                 } else if (event.type() == Type.HOST_REMOVED){
@@ -575,6 +576,8 @@ public class LoadBalancerComponent {
                 if(onlineServers.size() == 0){
                     log.info("No servers online");
                     return;
+                } else if (onlineServers.size() == 1){
+                    log.info("Only one server online");
                 } else {
                     for (String srv : onlineServers.keySet()) {
                         if (!serverLatencyStorage.containsKey(srv)){
@@ -595,9 +598,9 @@ public class LoadBalancerComponent {
                 if (maxLatencyFlows <= 2){
                     //entry cannot go below 2 flows
                     log.info("Flows at minimum of 2, aborting...");
-                } else if (diff < 0.15){
-                    //only update flows if they are at least 15% different    
-                    log.info("Similar values (<15% diff), aborting...");
+                } else if (diff < RATIO){
+                    //only update flows if they are at least RATIO different    
+                    log.info("Similar values (<{}% diff), aborting...", RATIO*100);
                 } else {
 
                     //remove one flow to max

@@ -6,6 +6,7 @@ if [ $# -eq 0 ] ; then
 fi
 
 n=$1
+let flows=128/n
 for ((i = 1 ; i <= n ; i++)) ; do
-    m server$i python /mininet/server.py server$i &
+    m server$i python /mininet/server.py server$i $flows &
 done

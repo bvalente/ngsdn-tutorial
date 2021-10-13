@@ -178,7 +178,10 @@ def main():
     #argument parser
     parser = argparse.ArgumentParser()
     parser.add_argument('serverName', type=str, help="Server id")
+    parser.add_argument('flows', type=int, default=32, help="Server flows")
     args = parser.parse_args()
+    global PREV_BATCH
+    PREV_BATCH = args.flows
 
     #logging
     filename = "/tmp/%s.out" % args.serverName

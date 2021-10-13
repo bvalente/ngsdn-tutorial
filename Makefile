@@ -9,6 +9,8 @@ app_name := org.onosproject.ngsdn-tutorial
 
 NGSDN_TUTORIAL_SUDO ?=
 
+servers := 4
+
 default:
 	$(error Please specify a make target (see README.md))
 
@@ -37,7 +39,7 @@ _start:
 	@mkdir -p tmp/onos
 	@NGSDN_TOPO_PY=${NGSDN_TOPO_PY} docker-compose up -d
 
-start: NGSDN_TOPO_PY := my-topo-lb.py
+start: NGSDN_TOPO_PY := topo-lb.py
 start: _start
 
 start-my-v4: NGSDN_TOPO_PY := my-topo-v4.py
@@ -63,6 +65,9 @@ start-v4: _start
 
 start-gtp: NGSDN_TOPO_PY := topo-gtp.py
 start-gtp: _start
+
+start-lb: NGSDN_TOPO_PY := topo-lb.py
+start-lb: _start
 
 pause:
 	@NGSDN_TOPO_PY=foo docker-compose pause
@@ -99,11 +104,9 @@ mn-cli:
 mn-log:
 	docker logs -f mininet
 
-_lb-server-start-4:
-	$(info *** Starting 4 LB servers...)
-	docker exec -d mininet /mininet/server-start.sh 4
-
-lb-server-start: _lb-server-start-4
+lb-server-start:
+	$(info *** Starting ${servers} LB servers...)
+	docker exec -d mininet /mininet/server-start.sh ${servers}
 
 lb-server-shutdown:
 	$(info *** Shutdown LB servers...)
@@ -154,6 +157,12 @@ netcfg-sr: _netcfg
 
 netcfg-gtp: NGSDN_NETCFG_JSON := netcfg-gtp.json
 netcfg-gtp: _netcfg
+
+netcfg-lb: NGSDN_NETCFG_JSON := netcfg-lb-${servers}.json
+netcfg-lb: _netcfg
+
+netcfg-lb-1: NGSDN_NETCFG_JSON := netcfg-lb-1.json
+netcfg-lb-1: _netcfg
 
 flowrule-gtp:
 	$(info *** Pushing flowrule-gtp.json to ONOS...)
