@@ -14,7 +14,7 @@ LATENCY=True
 # LATENCY=False
 COUNT=0
 CLIENT_SLEEP=0.1*128
-PREV_BATCH=42 #start with the same N of flows of the controller
+PREV_BATCH=32 #start with the same N of flows of the controller
 BATCH_TRIGGER=True
 LATENCY_TRIGGER=True
 
@@ -79,18 +79,22 @@ def sendLatency(args, alive):
 def sendLatencyOnTriggger(serverName, mySocket):
     global latencyListGlobal
     time.sleep(CLIENT_SLEEP)
-    # mySocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    if (len(latencyListGlobal) > 0):
-        #format: serverName:latency:<avg latency>:<sum latency>:<max latency>
-        message = serverName + ":latency:" + str(sum(latencyListGlobal) / len(latencyListGlobal)) + ":" + str(sum(latencyListGlobal)) + ":" + str(max(latencyListGlobal))
-        byte_message = message.encode("utf-8")
-        try:
+    try:
+        mySocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        if (len(latencyListGlobal) > 0):
+            #format: serverName:latency:<avg latency>:<sum latency>:<max latency>
+            message = serverName + ":latency:" + str(sum(latencyListGlobal) / len(latencyListGlobal)) + ":" + str(sum(latencyListGlobal)) + ":" + str(max(latencyListGlobal))
+            byte_message = message.encode("utf-8")
+            
+            # mySocket.connect((CONTROLLER_IP, 5005))
+            # mySocket.sendall(byte_message)
             mySocket.sendto(byte_message, (CONTROLLER_IP, 5005))
             latencyListGlobal = [] #reset list
-        except:
-            pass 
-        # finally:
-        #     mySocket.close() 
+    except:
+        pass
+    finally:
+        mySocket.close()
+
 
 def MakeGetHandler(args, mySocket):
     
@@ -196,7 +200,7 @@ def main():
     
     #http server
     # HandlerClass = MakeGetHandler(args, latencyThread)
-    mySocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    mySocket = "no" # mySocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     HandlerClass = MakeGetHandler(args, mySocket)
     httpd = SocketServer.TCPServer(("", PORT), HandlerClass)
 
@@ -217,7 +221,7 @@ def main():
         #         latencyThread.join()
         #     latencySocket.close()
 
-        mySocket.close()
+        # mySocket.close()
 
         logging.debug("Shutdown httpd")
         threading.Thread(target=httpd.shutdown).start()

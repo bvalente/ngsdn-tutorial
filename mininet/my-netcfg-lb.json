@@ -20,7 +20,8 @@
 				"servers": [
 					"00:00:00:00:10:10/10.0.10.1/server1",
 					"00:00:00:00:20:10/10.0.20.1/server2",
-					"00:00:00:00:30:10/10.0.30.1/server3"
+					"00:00:00:00:30:10/10.0.30.1/server3",
+					"00:00:00:00:40:10/10.0.40.1/server4"
 				]
 			}
 		  }
@@ -70,6 +71,17 @@
 			"vlan-untagged": 100
 		  }
 		]
+	  },
+	  "device:loadbalancer/5": {
+		"interfaces": [
+		  {
+			"name": "loadbalancer-5",
+			"ips": [
+			  "10.0.0.1/16"
+			],
+			"vlan-untagged": 100
+		  }
+		]
 	  }
 	},
 	"hosts": {
@@ -86,7 +98,7 @@
 		  "name": "server1",
 		  "locType": "grid",
 		  "gridX": 600,
-		  "gridY": 400
+		  "gridY": 300
 		}
 	  },
 	  "00:00:00:00:20:10/None": {
@@ -94,7 +106,7 @@
 		  "name": "server2",
 		  "locType": "grid",
 		  "gridX": 600,
-		  "gridY": 600
+		  "gridY": 400
 		}
 	  },
 	  "00:00:00:00:30:10/None": {
@@ -102,9 +114,17 @@
 		  "name": "server3",
 		  "locType": "grid",
 		  "gridX": 600,
-		  "gridY": 800
+		  "gridY": 600
 		}
-	  }
+	  },
+	  "00:00:00:00:40:10/None": {
+		"basic": {
+		  "name": "server4",
+		  "locType": "grid",
+		  "gridX": 600,
+		  "gridY": 700
+		}
 	}
   }
+}
   

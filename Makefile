@@ -99,11 +99,11 @@ mn-cli:
 mn-log:
 	docker logs -f mininet
 
-_lb-server-start-3:
-	$(info *** Starting 3 LB servers...)
-	docker exec -d mininet /mininet/server-start.sh 3
+_lb-server-start-4:
+	$(info *** Starting 4 LB servers...)
+	docker exec -d mininet /mininet/server-start.sh 4
 
-lb-server-start: _lb-server-start-3
+lb-server-start: _lb-server-start-4
 
 lb-server-shutdown:
 	$(info *** Shutdown LB servers...)

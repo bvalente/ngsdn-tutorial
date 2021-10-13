@@ -114,6 +114,22 @@ public final class Utils {
                 .build();
     }
 
+    public static FlowRule buildFlowRule(DeviceId switchId, ApplicationId appId,
+                                         String tableId, PiCriterion piCriterion,
+                                         PiTableAction piAction, int priority) {
+        return DefaultFlowRule.builder()
+                .forDevice(switchId)
+                .forTable(PiTableId.of(tableId))
+                .fromApp(appId)
+                .withPriority(priority)
+                .makePermanent()
+                .withSelector(DefaultTrafficSelector.builder()
+                                      .matchPi(piCriterion).build())
+                .withTreatment(DefaultTrafficTreatment.builder()
+                                       .piTableAction(piAction).build())
+                .build();
+    }
+
     public static GroupDescription buildSelectGroup(DeviceId deviceId,
                                                     String tableId,
                                                     String actionProfileId,

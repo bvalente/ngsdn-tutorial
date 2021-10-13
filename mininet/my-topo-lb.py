@@ -95,9 +95,12 @@ class TutorialTopo(Topo):
                           ip='10.0.20.1/16')
         server3 = self.addHost('server3', cls=IPv4Server, mac="00:00:00:00:30:10",
                           ip='10.0.30.1/16')
+        server4 = self.addHost('server4', cls=IPv4Server, mac="00:00:00:00:40:10",
+                          ip='10.0.40.1/16')
         self.addLink(server1, lb)  # port 2
         self.addLink(server2, lb)  # port 3
         self.addLink(server3, lb)  # port 4
+        self.addLink(server4, lb)  # port 5
 
 
 def main():

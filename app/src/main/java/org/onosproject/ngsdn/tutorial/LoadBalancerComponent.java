@@ -57,6 +57,9 @@ import org.onosproject.ngsdn.tutorial.common.Utils;
 import org.onosproject.ngsdn.tutorial.common.LoadBalancerConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import io.grpc.Server;
+
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -67,6 +70,8 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Map.Entry;
+import java.util.stream.Collector;
+import java.util.stream.Collectors;
 
 import static com.google.common.collect.Streams.stream;
 import static org.onosproject.ngsdn.tutorial.AppConstants.INITIAL_SETUP_DELAY;
@@ -96,6 +101,9 @@ public class LoadBalancerComponent {
     private HashMap<String, ServerFlows> serverFlowsStorage;
     private HashMap<String, String> onlineServers;
     private List<FlowRule> currentFlowRules;
+    private int currentPriority;
+
+    private int FLOWS = 64;
     
     //Aux object
     class ServerFlows {
@@ -165,6 +173,7 @@ public class LoadBalancerComponent {
         serverFlowsStorage = new HashMap<String, ServerFlows>();
         onlineServers = new HashMap<String, String>();
         currentFlowRules = new ArrayList<FlowRule>();
+        currentPriority = 0;
 
         hostService.addListener(hostListener);
         deviceService.addListener(deviceListener);
@@ -185,6 +194,7 @@ public class LoadBalancerComponent {
         log.info("Stopped");
     }
 
+    //one time setup for load balancer
     private void setupLoadBalancer(DeviceId deviceId){
 
         log.info("Adding Load Balancing Configurations to {} ...", deviceId);
@@ -234,46 +244,55 @@ public class LoadBalancerComponent {
 
         //install all basic flow rules
         flowRuleService.applyFlowRules(aclRule, myStationRule, arpRule);
+    }
 
-        //----
-        //initial load balancing configuration for all online servers
-        int nServers = loadBalancerConfig.servers.size();
-        int nFlows = 64 / nServers;
-        FlowRule[] unsetServerRules = new FlowRule[nServers];
-        int i = 0;
+    //create server unsetRule - 
+    //rules for packets that go from server to host need to replace the server IP with the virtual IP
+    private FlowRule createUnsetRule(DeviceId deviceId, String serverConfig){
+        LoadBalancerConfig loadBalancerConfig = getLoadBalancerConfig(deviceId);
 
-        for (String serverString : loadBalancerConfig.servers) {
-            
-            //TODO create function to do this default action
-            //set initial flows for servers
-            String serverName = serverString.split("/")[2];
-            serverFlowsStorage.put(serverName, new ServerFlows(serverString, nFlows));
-            
-            //populate unset_server_table
-            PiCriterion unsetCriterion = PiCriterion.builder()
-                .matchExact(
-                        PiMatchFieldId.of("hdr.ipv4.src_addr"),
-                        Ip4Address.valueOf(serverString.split("/")[1]).toOctets() )
-                .build();
-            List<PiActionParam> params = new LinkedList<PiActionParam>();
-            params.add(new PiActionParam(
-                PiActionParamId.of("mac"),
-                loadBalancerConfig.myVirtualMac.toBytes()));
-            params.add(new PiActionParam(
-                PiActionParamId.of("ip"),
-                loadBalancerConfig.myVirtualIp.toOctets()));
-            PiTableAction unsetAction = PiAction.builder()
-                .withId(PiActionId.of("IngressPipeImpl.unset_server"))
-                .withParameters(params)
-                .build();
+        PiCriterion unsetCriterion = PiCriterion.builder()
+            .matchExact(
+                    PiMatchFieldId.of("hdr.ipv4.src_addr"),
+                    Ip4Address.valueOf(serverConfig.split("/")[1]).toOctets() )
+            .build();
+        List<PiActionParam> params = new LinkedList<PiActionParam>();
+        params.add(new PiActionParam(
+            PiActionParamId.of("mac"),
+            loadBalancerConfig.myVirtualMac.toBytes()));
+        params.add(new PiActionParam(
+            PiActionParamId.of("ip"),
+            loadBalancerConfig.myVirtualIp.toOctets()));
+        PiTableAction unsetAction = PiAction.builder()
+            .withId(PiActionId.of("IngressPipeImpl.unset_server"))
+            .withParameters(params)
+            .build();
+        FlowRule unsetRule = Utils.buildFlowRule(
+            deviceId, appId, "IngressPipeImpl.unset_server_table",
+            unsetCriterion, unsetAction);
+        
+        return unsetRule;
+    }
+
+    //initial setup all serverFlows based only on online servers
+    private void setupServerFlowsStorage(DeviceId deviceId){
+        synchronized(serverFlowsStorage){
+            int nServers = onlineServers.size();
+            int nFlows = FLOWS / nServers;
     
-            unsetServerRules[i++] = Utils.buildFlowRule(
-                deviceId, appId, "IngressPipeImpl.unset_server_table", 
-                unsetCriterion, unsetAction);
+            //clear serverFlowsStorage
+            serverFlowsStorage.clear();
+    
+            //set initial server flows
+            for (String serverConfig : onlineServers.values()){
+                String serverName = serverConfig.split("/")[2];
+                ServerFlows serverFlows = new ServerFlows(serverConfig, nFlows);
+                serverFlowsStorage.put(serverName, serverFlows);
+            }
+    
+            //apply flows
+            applyServerFlowsStorage(deviceId);
         }
-                
-        flowRuleService.applyFlowRules(unsetServerRules);
-        applyServerFlowsStorage(deviceId);
     }
 
     //pre-load onlineServers with serverConfig string
@@ -283,15 +302,46 @@ public class LoadBalancerComponent {
         LoadBalancerConfig loadBalancerConfig = getLoadBalancerConfig(deviceId);
         String serverConfig = loadBalancerConfig.servers.stream()
             .filter(config -> config.split("/")[2].equals(hostName))
-            .findFirst().get();
+            .findFirst().orElse(null);
+        
+        if (serverConfig == null){
+            log.info("Server online without config: {}", hostName);
+            return;
+        }
+        
+        //save in onlineServers map
         onlineServers.put(hostName, serverConfig);
-        log.info("Server online: {}", host);
+
+        //apply unset rule
+        FlowRule unsetRule = createUnsetRule(deviceId, serverConfig);
+        flowRuleService.applyFlowRules(unsetRule);
+
+        //setup and apply ServerFlowsStorage
+        setupServerFlowsStorage(deviceId);
+
+        log.info("Server online: {}", hostName);
     }
 
     //remove offline servers
     private void serverOffline(Host host){
-        onlineServers.remove(host.annotations().value("name"));
-        log.info("Server offline: {}", host);
+        String hostName = host.annotations().value("name");
+        DeviceId deviceId = host.location().deviceId();
+        LoadBalancerConfig loadBalancerConfig = getLoadBalancerConfig(deviceId);
+        String serverConfig = loadBalancerConfig.servers.stream()
+            .filter(config -> config.split("/")[2].equals(hostName))
+            .findFirst().get();
+
+        //remove from onlineServers map
+        onlineServers.remove(hostName);
+
+        //remove unset rule
+        FlowRule unsetRule = createUnsetRule(deviceId, serverConfig);
+        flowRuleService.removeFlowRules(unsetRule);
+
+        //setup and apply ServerFlowsStorage
+        setupServerFlowsStorage(deviceId);
+
+        log.info("Server offline: {}", hostName);
     }
 
     //Install flow rules for servers
@@ -300,8 +350,8 @@ public class LoadBalancerComponent {
             .map(serverFlows -> serverFlows.flows)
             .reduce(0, (load1, load2) -> load1 + load2);
         // log.info("Install server flows, total: {}", Integer.toString(total));
-        if (total > 64){
-            log.info("Total flows > 64, aborting...");
+        if (total > FLOWS){
+            log.info("Total flows > {}, aborting...", FLOWS);
             return;
         }
 
@@ -311,7 +361,7 @@ public class LoadBalancerComponent {
 
         for (ServerFlows serverFlows : serverFlowsStorage.values()) {
             int end = start + serverFlows.flows - 1;
-            if (end == 62) { end = 63;} //special case for odd number of servers
+            if (end == (FLOWS - 2)) { end = (FLOWS - 1); serverFlows.flows++;} //special case for odd number of servers
 
             PiCriterion criterion = PiCriterion.builder()
                 .matchRange(
@@ -332,14 +382,20 @@ public class LoadBalancerComponent {
                 .withParameters(params)
                 .build();
             FlowRule flowRule = Utils.buildFlowRule(
-                deviceId, appId, "IngressPipeImpl.load_balancer_table", criterion, action);
+                deviceId, appId, "IngressPipeImpl.load_balancer_table", criterion, action, currentPriority);
             
             log.info("Installing {} flows for {}", serverFlows.flows, serverFlows.name);
             rules[i] = flowRule;
             start = end + 1;
             i++;
         }
-        
+
+        //update priority
+        if (currentPriority >= org.onosproject.net.flow.FlowRule.MAX_PRIORITY ) {
+            currentPriority = 0;
+        } else {
+            currentPriority++;
+        }
         //remove old rules
         flowRuleService.removeFlowRules(currentFlowRules.toArray(new FlowRule[0]));
         //save new rules
@@ -508,7 +564,6 @@ public class LoadBalancerComponent {
 
             synchronized(serverLatencyStorage){
     
-                //TODO discuss average vs sum vs max latency
                 String serverName = serverLatencyArray[0];
                 float latency = Float.parseFloat(serverLatencyArray[2]); //avgLatency
                 // float latency = Float.parseFloat(serverLatencyArray[3]); //sumLatency
