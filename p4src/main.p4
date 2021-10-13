@@ -42,6 +42,7 @@ typedef bit<16>  mcast_group_id_t;
 typedef bit<32>  ipv4_addr_t;
 typedef bit<128> ipv6_addr_t;
 typedef bit<16>  l4_port_t;
+typedef bit<6>   lb_flows_t;
 
 const bit<16> ETHERTYPE_IPV4 = 0x0800;
 const bit<16> ETHERTYPE_ARP  = 0x0806;
@@ -221,10 +222,10 @@ struct local_metadata_t {
     bit<8>      ip_proto;
     bit<8>      icmp_type;
     bit<16>     arp_op;
-    bit<6>      next_server;
+    lb_flows_t     next_server;
 }
 
-register<bit<6>>(1) next_server_register;
+register<lb_flows_t>(1) next_server_register;
 
 register<bit<1>>(8192) has_tcp_flow;
 
@@ -734,7 +735,7 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
                         //update next server
                         next_server_register.write(
                             (bit<32>)0, 
-                            local_metadata.next_server + (bit<6>)1); //will overflow
+                            local_metadata.next_server + (lb_flows_t)1); //will overflow
 
                         //lb_table will save next server in register
                         skip_lb_table = false;
@@ -752,7 +753,7 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
                     //update next server
                     next_server_register.write(
                         (bit<32>)0, 
-                        local_metadata.next_server + (bit<6>)1); // will overflow
+                        local_metadata.next_server + (lb_flows_t)1); // will overflow
 
                     //hit lb_table!
                     skip_lb_table = false;
